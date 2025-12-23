@@ -1,0 +1,16 @@
+# Ignorar dependencias y archivos sensibles
+node_modules/
+.env
+*.env
+*.key
+*.pem
+*.crt
+*.p12
+*.db
+*.sqlite
+*.log
+*.secret
+*.token
+*.bak
+*.cache
+/.DS_Store
