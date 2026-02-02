@@ -14,3 +14,4 @@ node_modules/
 *.bak
 *.cache
 /.DS_Store
+/generated/prisma

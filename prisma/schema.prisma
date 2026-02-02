@@ -1,0 +1,20 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Photo {
+  id        String   @id @default(uuid())
+
+  s3Key     String   @unique
+  url       String
+
+  filename  String
+  mimeType  String
+  size      Int
+
+  createdAt DateTime @default(now())
+}
