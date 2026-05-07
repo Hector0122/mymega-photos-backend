@@ -4,4 +4,10 @@ export declare class AppController {
     constructor(appService: AppService);
     getPhotos(): Promise<string[]>;
     getPhotoByFilename(): Promise<void>;
+    uploadPhoto(body: {
+        image: string;
+        filename: string;
+    }): Promise<{
+        url: string;
+    }>;
 }
