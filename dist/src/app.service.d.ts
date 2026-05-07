@@ -1,6 +1,20 @@
 export declare class AppService {
     private s3;
-    getPhotos(): Promise<string[]>;
-    uploadPhotoBase64(base64Image: string, filename: string): Promise<string>;
-    getPhotoByFilename(): Promise<void>;
+    private baseName;
+    getPhotos(continuationToken?: string, maxKeys?: number): Promise<{
+        photos: {
+            uri: string;
+            date: string;
+        }[];
+        nextToken: string | null;
+    }>;
+    uploadPhoto(buffer: Buffer, filename: string): Promise<string>;
+    getPhotoUrl(key: string): Promise<string>;
+    deletePhoto(key: string): Promise<void>;
+    generateMissingThumbnails(): Promise<{
+        generated: number;
+    }>;
+    migrateToFolders(): Promise<{
+        moved: number;
+    }>;
 }
