@@ -1,7 +1,9 @@
 # Ignorar dependencias y archivos sensibles
 node_modules/
 .env
-*.env
+.env.local
+.env.*.local
+.env.production
 *.key
 *.pem
 *.crt
@@ -15,3 +17,21 @@ node_modules/
 *.cache
 /.DS_Store
 /generated/prisma
+
+# Compilado
+dist/
+*.tsbuildinfo
+build/
+
+# Tests
+coverage/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db

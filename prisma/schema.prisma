@@ -6,6 +6,26 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
+
+  photos    Photo[]
+  albums    Album[]
+}
+
+model Album {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  photos    Photo[]
+  createdAt DateTime @default(now())
+}
+
 model Photo {
   id        String   @id @default(uuid())
 
@@ -16,5 +36,14 @@ model Photo {
   mimeType  String
   size      Int
 
+  lat       Float?
+  lng       Float?
+  favorite  Boolean  @default(false)
+  tags      String[]
+
   createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  albums    Album[]
 }
