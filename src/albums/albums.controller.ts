@@ -8,10 +8,10 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
-} from '@nestjs/common'
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'
-import { CurrentUser } from '../auth/current-user.decorator'
-import { AlbumsService } from './albums.service'
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { AlbumsService } from './albums.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('albums')
@@ -20,7 +20,7 @@ export class AlbumsController {
 
   @Get()
   async list(@CurrentUser() user: { id: string }) {
-    return this.albums.list(user.id)
+    return this.albums.list(user.id);
   }
 
   @Post()
@@ -28,17 +28,14 @@ export class AlbumsController {
     @CurrentUser() user: { id: string },
     @Body() body: { name: string },
   ) {
-    return this.albums.create(user.id, body.name)
+    return this.albums.create(user.id, body.name);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  async delete(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
-  ) {
-    await this.albums.delete(user.id, id)
-    return { deleted: true }
+  async delete(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    await this.albums.delete(user.id, id);
+    return { deleted: true };
   }
 
   @Post(':id/photos')
@@ -48,7 +45,7 @@ export class AlbumsController {
     @Param('id') id: string,
     @Body() body: { photoIds: string[] },
   ) {
-    return this.albums.addPhotos(user.id, id, body.photoIds)
+    return this.albums.addPhotos(user.id, id, body.photoIds);
   }
 
   @Delete(':id/photos')
@@ -58,6 +55,6 @@ export class AlbumsController {
     @Param('id') id: string,
     @Body() body: { photoIds: string[] },
   ) {
-    return this.albums.removePhotos(user.id, id, body.photoIds)
+    return this.albums.removePhotos(user.id, id, body.photoIds);
   }
 }

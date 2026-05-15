@@ -56,6 +56,7 @@ Photo-sharing app: React Native frontend (Android) + NestJS backend, photos stor
 ## Common commands
 
 ### Backend
+
 ```bash
 cd mymega-photos-backend
 npm run build          # compile TS
@@ -63,6 +64,7 @@ npm run start:dev      # watch mode on :3000
 ```
 
 ### Frontend
+
 ```bash
 cd frontend
 yarn start             # Metro bundler on :8081
@@ -71,6 +73,7 @@ npx tsc --noEmit       # type-check
 ```
 
 ### Device connection
+
 ```bash
 adb devices            # verify device
 adb reverse tcp:3000 tcp:3000   # proxy :3000 to device

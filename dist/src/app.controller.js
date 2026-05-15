@@ -18,13 +18,14 @@ const platform_express_1 = require("@nestjs/platform-express");
 const jwt_auth_guard_1 = require("./auth/jwt-auth.guard");
 const current_user_decorator_1 = require("./auth/current-user.decorator");
 const app_service_1 = require("./app.service");
+const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 let AppController = class AppController {
     appService;
     constructor(appService) {
         this.appService = appService;
     }
-    async getPhotos(user, pageToken, maxKeys, query, favorites) {
-        return this.appService.getPhotos(user.id, pageToken, maxKeys ? parseInt(maxKeys, 10) : 50, query, favorites === 'true');
+    async getPhotos(user, pageToken, maxKeys, query, favorites, blurry) {
+        return this.appService.getPhotos(user.id, pageToken, maxKeys ? parseInt(maxKeys, 10) : 50, query, favorites === 'true', blurry === 'true');
     }
     async toggleFavorite(user, id) {
         const favorite = await this.appService.toggleFavorite(user.id, id);
@@ -45,18 +46,42 @@ let AppController = class AppController {
     async getGeotaggedPhotos(user) {
         return this.appService.getGeotaggedPhotos(user.id);
     }
+    async getPhotoStats(user) {
+        return this.appService.getStats(user.id);
+    }
+    async getThisDayPhotos(user) {
+        return this.appService.getThisDayPhotos(user.id);
+    }
+    async analyzeAllPhotos(user) {
+        return this.appService.analyzeAllPhotos(user.id);
+    }
+    async getDuplicates(user) {
+        return this.appService.getDuplicates(user.id);
+    }
+    async analyzePhoto(_user, id) {
+        return this.appService.analyzePhoto(id);
+    }
     async getPhotoById(user, id) {
         return { url: await this.appService.getPhotoUrl(user.id, id) };
     }
     async uploadPhoto(user, file, lat, lng) {
         if (!file)
             throw new common_1.BadRequestException('No file provided');
+        if (lat !== undefined && (isNaN(Number(lat)) || Number(lat) < -90 || Number(lat) > 90)) {
+            throw new common_1.BadRequestException('lat inválido');
+        }
+        if (lng !== undefined && (isNaN(Number(lng)) || Number(lng) < -180 || Number(lng) > 180)) {
+            throw new common_1.BadRequestException('lng inválido');
+        }
         const url = await this.appService.uploadPhoto(user.id, file.buffer, file.originalname, lat ? parseFloat(lat) : undefined, lng ? parseFloat(lng) : undefined);
         return { url };
     }
     async getShareLink(user, id, expiresIn) {
         const url = await this.appService.getShareLink(user.id, id, expiresIn ? parseInt(expiresIn, 10) : 604800);
         return { url };
+    }
+    async exportPhotos(user) {
+        return this.appService.exportAllPhotos(user.id);
     }
     async deletePhoto(user, id) {
         await this.appService.deletePhoto(user.id, id);
@@ -81,8 +106,9 @@ __decorate([
     __param(2, (0, common_1.Query)('maxKeys')),
     __param(3, (0, common_1.Query)('q')),
     __param(4, (0, common_1.Query)('favorites')),
+    __param(5, (0, common_1.Query)('blurry')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, String, String, String]),
+    __metadata("design:paramtypes", [Object, String, String, String, String, String]),
     __metadata("design:returntype", Promise)
 ], AppController.prototype, "getPhotos", null);
 __decorate([
@@ -127,6 +153,49 @@ __decorate([
 ], AppController.prototype, "getGeotaggedPhotos", null);
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Get)('photos/stats'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "getPhotoStats", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Get)('photos/this-day'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "getThisDayPhotos", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('photos/analyze-all'),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "analyzeAllPhotos", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Get)('photos/duplicates'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "getDuplicates", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('photos/:id/analyze'),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "analyzePhoto", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Get)('photos/:id'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('id')),
@@ -138,7 +207,17 @@ __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('photos/upload'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
-    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', { limits: { fileSize: 50 * 1024 * 1024 } })),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
+        limits: { fileSize: 50 * 1024 * 1024 },
+        fileFilter: (_req, file, cb) => {
+            if (ALLOWED_MIMES.includes(file.mimetype)) {
+                cb(null, true);
+            }
+            else {
+                cb(new common_1.UnprocessableEntityException(`Formato no soportado: ${file.mimetype}`), false);
+            }
+        },
+    })),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.UploadedFile)()),
     __param(2, (0, common_1.Query)('lat')),
@@ -159,6 +238,15 @@ __decorate([
 ], AppController.prototype, "getShareLink", null);
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('photos/export'),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AppController.prototype, "exportPhotos", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Delete)('photos/:id'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
@@ -168,6 +256,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AppController.prototype, "deletePhoto", null);
 __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('photos/migrate-thumbnails'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
     __metadata("design:type", Function),
@@ -175,6 +264,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AppController.prototype, "migrateThumbnails", null);
 __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('photos/migrate-folders'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
     __metadata("design:type", Function),
@@ -182,6 +272,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AppController.prototype, "migrateFolders", null);
 __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('photos/sync-s3'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
     __metadata("design:type", Function),

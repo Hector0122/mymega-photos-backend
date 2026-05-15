@@ -4,20 +4,20 @@ import { ValidationPipe } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
-import { PrismaService } from './prisma.service'
+import { PrismaModule } from './prisma.module'
 import { AuthModule } from './auth/auth.module'
 import { AlbumsModule } from './albums/albums.module'
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
     AuthModule,
     AlbumsModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    PrismaService,
     {
       provide: APP_PIPE,
       useFactory: () =>

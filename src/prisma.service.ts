@@ -21,19 +21,19 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   }
 
   private async seedDefaultUser() {
+    const email = process.env.DEMO_EMAIL || 'demo@mymega.com'
+    const passwordRaw = process.env.DEMO_PASSWORD || '123456'
+    const name = process.env.DEMO_NAME || 'Demo User'
+
     const exists = await this.user.findUnique({
-      where: { email: 'demo@mymega.com' },
+      where: { email },
     })
     if (exists) return
 
-    const password = await bcrypt.hash('123456', 10)
+    const password = await bcrypt.hash(passwordRaw, 10)
     await this.user.create({
-      data: {
-        email: 'demo@mymega.com',
-        name: 'Demo User',
-        password,
-      },
+      data: { email, name, password },
     })
-    console.log('Default user created — demo@mymega.com / 123456')
+    console.log(`Default user created — ${email} / ${passwordRaw}`)
   }
 }

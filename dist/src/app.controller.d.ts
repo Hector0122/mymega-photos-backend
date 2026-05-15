@@ -4,13 +4,14 @@ export declare class AppController {
     constructor(appService: AppService);
     getPhotos(user: {
         id: string;
-    }, pageToken?: string, maxKeys?: string, query?: string, favorites?: string): Promise<{
+    }, pageToken?: string, maxKeys?: string, query?: string, favorites?: string, blurry?: string): Promise<{
         photos: {
             uri: string;
             date: string;
             id: string;
             favorite: boolean;
             tags: string[];
+            blurred: boolean;
         }[];
         nextToken: string | null;
     }>;
@@ -32,13 +33,53 @@ export declare class AppController {
     getGeotaggedPhotos(user: {
         id: string;
     }): Promise<{
-        url: string;
         id: string;
-        s3Key: string;
+        url: string;
         filename: string;
         lat: number | null;
         lng: number | null;
     }[]>;
+    getPhotoStats(user: {
+        id: string;
+    }): Promise<{
+        photoCount: number;
+        albumCount: number;
+        favoriteCount: number;
+        blurryCount: number;
+    }>;
+    getThisDayPhotos(user: {
+        id: string;
+    }): Promise<{
+        year: number;
+        uri: string;
+        id: string;
+        filename: string;
+        count: number;
+        yearsAgo: number;
+    }[]>;
+    analyzeAllPhotos(user: {
+        id: string;
+    }): Promise<{
+        analyzed: number;
+    }>;
+    getDuplicates(user: {
+        id: string;
+    }): Promise<{
+        id: string;
+        url: string;
+        filename: string;
+        perceptualHash: string | null;
+        blurred: boolean;
+        blurScore: number | null;
+        createdAt: Date;
+    }[][]>;
+    analyzePhoto(_user: {
+        id: string;
+    }, id: string): Promise<{
+        blurred: boolean;
+        blurScore: number;
+        perceptualHash: string;
+    }>;
     getPhotoById(user: {
         id: string;
     }, id: string): Promise<{
@@ -53,6 +94,11 @@ export declare class AppController {
         id: string;
     }, id: string, expiresIn?: string): Promise<{
         url: string;
+    }>;
+    exportPhotos(user: {
+        id: string;
+    }): Promise<{
+        message: string;
     }>;
     deletePhoto(user: {
         id: string;

@@ -10,8 +10,9 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String
-  password  String
-  createdAt DateTime @default(now())
+  password      String
+  refreshToken  String?
+  createdAt     DateTime @default(now())
 
   photos    Photo[]
   albums    Album[]
@@ -24,12 +25,15 @@ model Album {
   user      User     @relation(fields: [userId], references: [id])
   photos    Photo[]
   createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Photo {
   id        String   @id @default(uuid())
 
   s3Key     String   @unique
+  thumbS3Key String?
   url       String
 
   filename  String
@@ -40,10 +44,17 @@ model Photo {
   lng       Float?
   favorite  Boolean  @default(false)
   tags      String[]
+  blurred   Boolean  @default(false)
+  blurScore Float?
+  perceptualHash String?
 
   createdAt DateTime @default(now())
 
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   albums    Album[]
+
+  @@index([userId])
+  @@index([userId, favorite])
+  @@index([userId, createdAt])
 }
