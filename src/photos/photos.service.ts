@@ -78,9 +78,22 @@ export class PhotosService {
 
     const r2AccountId = process.env.R2_ACCOUNT_ID;
     const workerPath = path.join(__dirname, 'upload.worker.js');
-    const worker = new Worker(workerPath, {
-      workerData: { batchId, userId, files: workerFiles, bucket, region, r2AccountId },
-    });
+    this.logger.log(`Spawning upload worker: ${workerPath}, files: ${files.length}`);
+
+    let worker: Worker
+    try {
+      worker = new Worker(workerPath, {
+        workerData: { batchId, userId, files: workerFiles, bucket, region, r2AccountId },
+      })
+    } catch (err) {
+      this.logger.error(`Failed to create worker: ${(err as Error).message}`)
+      const b = this._batches.get(batchId)
+      if (b) {
+        b.status = 'error'
+        b.message = `Error al iniciar worker: ${(err as Error).message}`
+      }
+      return batchId
+    }
 
     worker.on('message', (msg: any) => {
       const b = this._batches.get(msg.batchId);
@@ -112,12 +125,16 @@ export class PhotosService {
     });
 
     worker.on('error', (err) => {
-      this.logger.error(`Worker error for batch ${batchId}`, err);
+      this.logger.error(`Worker error for batch ${batchId}: ${err.message}`, err.stack);
       const b = this._batches.get(batchId);
       if (b) {
         b.status = 'error';
         b.message = err.message;
       }
+    });
+
+    worker.on('exit', (code) => {
+      this.logger.log(`Worker for batch ${batchId} exited with code ${code}`);
     });
 
     return batchId;
