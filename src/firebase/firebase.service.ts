@@ -66,7 +66,7 @@ export class FirebaseService implements OnModuleInit {
       notification: { title: payload.title, body: payload.body },
       android: {
         notification: {
-          channelId: 'mymega_export',
+          channelId: 'vaulta_export',
           icon: 'ic_notification',
           color: '#007AFF',
           priority: 'high',

@@ -1,4 +1,4 @@
-# MyMega Photos — Backend
+# Vaulta — Backend
 
 NestJS 11 API that stores photos in AWS S3, generates thumbnails via `sharp`, and serves signed URLs.
 

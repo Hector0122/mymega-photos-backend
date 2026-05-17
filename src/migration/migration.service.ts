@@ -33,9 +33,9 @@ export class MigrationService {
     const bucket = this.getBucket();
 
     const demoUser = await this.prisma.user.findUnique({
-      where: { email: 'demo@mymega.com' },
+      where: { email: 'demo@vaulta.app' },
     });
-    if (!demoUser) throw new Error('Default user (demo@mymega.com) not found');
+    if (!demoUser) throw new Error('Default user (demo@vaulta.app) not found');
 
     let continuationToken: string | undefined;
     let synced = 0;

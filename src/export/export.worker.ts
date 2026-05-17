@@ -53,7 +53,7 @@ async function run(input: ExportWorkerInput) {
   const zipKey = `exports/${userId}/${Date.now()}.zip`;
   const tmpPath = path.join(
     os.tmpdir(),
-    `mymega-export-${userId}-${Date.now()}.zip`,
+    `vaulta-export-${userId}-${Date.now()}.zip`,
   );
 
   const { ZipArchive } = req('archiver');
@@ -103,37 +103,38 @@ async function run(input: ExportWorkerInput) {
     { expiresIn: 86400 },
   );
 
-  const smtpHost = process.env.SMTP_HOST;
-  if (smtpHost && userEmail) {
+  const mailgunDomain = process.env.SMTP_USER?.split('@')[1];
+  const mailgunApiKey = process.env.SMTP_PASS;
+  if (mailgunDomain && mailgunApiKey && userEmail) {
     try {
       sendProgress(photos.length, photos.length, `Enviando correo…`);
-      const nodemailer = req('nodemailer');
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        auth: {
-          user: process.env.SMTP_USER || '',
-          pass: process.env.SMTP_PASS || '',
-        },
-        connectionTimeout: 30000,
-        greetingTimeout: 30000,
-        socketTimeout: 60000,
-      });
-      const safeUrl = downloadUrl.replace(/&/g, '&amp;');
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM || 'noreply@mymega.com',
-        to: userEmail,
-        subject: `Exportación de ${label} - MyMega Photos`,
-        html: `
+      const auth = Buffer.from(`api:${mailgunApiKey}`).toString('base64');
+      const formData = [
+        `from=${encodeURIComponent(process.env.SMTP_FROM || `noreply@${mailgunDomain}`)}`,
+        `to=${encodeURIComponent(userEmail)}`,
+        `subject=${encodeURIComponent(`Exportación de ${label} - Vaulta`)}`,
+        `html=${encodeURIComponent(`
           <h2>Exportación completada</h2>
           <p>Tu exportación de ${label} con ${photos.length} foto(s) está lista.</p>
           <p>Haz clic aquí para descargar (válido por 24 horas):</p>
-          <p><a href="${safeUrl}" style="display:inline-block;padding:14px 32px;background:#4F46E5;color:#fff;text-decoration:none;border-radius:8px;font-size:16px">Descargar ZIP</a></p>
+          <p><a href="${downloadUrl}" style="display:inline-block;padding:14px 32px;background:#4F46E5;color:#fff;text-decoration:none;border-radius:8px;font-size:16px">Descargar ZIP</a></p>
           <p>O copia este enlace en tu navegador:</p>
-          <p style="word-break:break-all;font-size:12px;color:#666">${safeUrl}</p>
-          <p>Saludos,<br>El equipo de MyMega Photos</p>
-        `,
+          <p style="word-break:break-all;font-size:12px;color:#666">${downloadUrl}</p>
+          <p>Saludos,<br>El equipo de Vaulta</p>
+        `)}`,
+      ].join('&');
+      const res = await fetch(`https://api.mailgun.net/v3/${mailgunDomain}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData,
       });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Mailgun API ${res.status}: ${text}`);
+      }
     } catch (e) {
       parentPort?.postMessage({
         type: 'smtp_error',
@@ -148,7 +149,7 @@ async function run(input: ExportWorkerInput) {
     type: 'done',
     exportId,
     downloadUrl,
-    message: `Exportación de ${label} completada.${smtpHost && userEmail ? ' Revisa tu correo.' : ''}`,
+    message: `Exportación de ${label} completada.${mailgunDomain && userEmail ? ' Revisa tu correo.' : ''}`,
   });
 }
 

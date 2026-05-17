@@ -45,7 +45,7 @@ const ALLOWED_MIMES = [
   'video/webm',
 ];
 
-const uploadTmpDir = path.join(os.tmpdir(), 'mymega-uploads');
+const uploadTmpDir = path.join(os.tmpdir(), 'vaulta-uploads');
 if (!fs.existsSync(uploadTmpDir))
   fs.mkdirSync(uploadTmpDir, { recursive: true });
 

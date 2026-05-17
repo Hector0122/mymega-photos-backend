@@ -4,6 +4,6 @@ import { Controller, Get } from '@nestjs/common';
 export class AppController {
   @Get()
   health() {
-    return { status: 'ok', service: 'mymega-photos-backend' };
+    return { status: 'ok', service: 'vaulta-api' };
   }
 }

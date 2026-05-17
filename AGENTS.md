@@ -1,8 +1,8 @@
-# MyMega Photos — Context for AI assistants
+# Vaulta — Context for AI assistants
 
 ## Project overview
 
-Photo-sharing app: React Native frontend (Android) + NestJS backend, photos stored in AWS S3 with server-side thumbnail generation.
+Photo-sharing app: React Native frontend (Android) + NestJS backend, photos stored in Cloudflare R2 with server-side thumbnail generation.
 
 ## Repo structure
 
@@ -89,7 +89,7 @@ adb reverse tcp:3000 tcp:3000   # proxy :3000 to device
 - Upload screen shows a green banner "Foto subida correctamente" at top and auto-navigates to Home after 800ms (no Alert)
 - `POST /photos/sync-s3` imports existing S3 photos into DB (needs at least 1 user registered)
 - Migration endpoints: `POST /photos/migrate-thumbnails`, `POST /photos/migrate-folders`, `POST /photos/sync-s3`
-- `JWT_SECRET` env var configures the JWT signing key (defaults to `mymega-secret-key`)
+- `JWT_SECRET` env var configures the JWT signing key
 - `DATABASE_URL` must point to a running Postgres instance with migrations applied
 
 ## Recent changes
