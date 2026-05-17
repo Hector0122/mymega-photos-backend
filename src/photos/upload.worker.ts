@@ -83,36 +83,50 @@ async function run(input: UploadWorkerInput) {
         const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}.jpg`;
         const thumbPath = file.path + '-thumb.jpg';
         try {
-          const ffmpegPath = req('ffmpeg-static');
-          const ffmpeg = (await import('fluent-ffmpeg')).default;
-          ffmpeg.setFfmpegPath(ffmpegPath);
-          await new Promise<void>((resolve, reject) => {
-            ffmpeg(file.path)
-              .on('end', () => resolve())
-              .on('error', reject)
-              .screenshots({
-                count: 1,
-                timemarks: ['1'],
-                filename: path.basename(thumbPath),
-                folder: path.dirname(thumbPath),
-                size: '300x?',
-              });
-          });
-          const thumbBuffer = fs.readFileSync(thumbPath);
-          await s3.send(
-            new PutObjectCommand({
-              Bucket: bucket,
-              Key: thumbKey,
-              Body: thumbBuffer,
-              ContentType: 'image/jpeg',
-            }),
-          );
+          let ffmpegPath: string | null = null
           try {
-            fs.unlinkSync(thumbPath);
-          } catch {
-            /* ignore */
+            const staticPath = req('ffmpeg-static')
+            if (fs.existsSync(staticPath)) ffmpegPath = staticPath
+          } catch { /* fall through */ }
+          if (!ffmpegPath) {
+            try {
+              const { execSync } = await import('child_process')
+              ffmpegPath = execSync('which ffmpeg', { encoding: 'utf8' }).trim()
+            } catch { /* ffmpeg not on PATH */ }
           }
-          videoThumbKey = thumbKey
+          if (!ffmpegPath) {
+            console.error(`[UploadWorker] ffmpeg not found, skipping thumbnail for ${file.filename}`)
+          } else {
+            const ffmpeg = (await import('fluent-ffmpeg')).default;
+            ffmpeg.setFfmpegPath(ffmpegPath);
+            await new Promise<void>((resolve, reject) => {
+              ffmpeg(file.path)
+                .on('end', () => resolve())
+                .on('error', reject)
+                .screenshots({
+                  count: 1,
+                  timemarks: ['1'],
+                  filename: path.basename(thumbPath),
+                  folder: path.dirname(thumbPath),
+                  size: '300x?',
+                });
+            });
+            const thumbBuffer = fs.readFileSync(thumbPath);
+            await s3.send(
+              new PutObjectCommand({
+                Bucket: bucket,
+                Key: thumbKey,
+                Body: thumbBuffer,
+                ContentType: 'image/jpeg',
+              }),
+            );
+            try {
+              fs.unlinkSync(thumbPath);
+            } catch {
+              /* ignore */
+            }
+            videoThumbKey = thumbKey
+          }
         } catch (e) {
           const errMsg = (e as Error).message;
           lastError += ` thumb:${errMsg}`;
