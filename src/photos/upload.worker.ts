@@ -77,6 +77,8 @@ async function run(input: UploadWorkerInput) {
         ? `${r2Endpoint}/${bucket}/${fullKey}`
         : `https://${bucket}.s3.${region}.amazonaws.com/${fullKey}`;
 
+      let videoThumbKey: string | undefined
+
       if (isVideo) {
         const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}.jpg`;
         const thumbPath = file.path + '-thumb.jpg';
@@ -110,14 +112,17 @@ async function run(input: UploadWorkerInput) {
           } catch {
             /* ignore */
           }
+          videoThumbKey = thumbKey
         } catch (e) {
-          lastError += ` thumb:${(e as Error).message}`;
+          const errMsg = (e as Error).message;
+          lastError += ` thumb:${errMsg}`;
+          console.error(`[UploadWorker] Thumbnail generation failed for ${file.filename}: ${errMsg}`);
         }
 
         await prisma.photo.create({
           data: {
             s3Key: fullKey,
-            thumbS3Key: thumbKey,
+            thumbS3Key: videoThumbKey,
             url,
             filename: file.filename,
             mimeType: file.mimeType,

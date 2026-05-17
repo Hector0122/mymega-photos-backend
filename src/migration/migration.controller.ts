@@ -32,6 +32,12 @@ export class MigrationController {
     return this.migrationService.syncS3ToDb();
   }
 
+  @Post('photos/fix-video-thumbnails')
+  @HttpCode(HttpStatus.OK)
+  async fixVideoThumbnails() {
+    return this.migrationService.fixVideoThumbnails();
+  }
+
   @Post('photos/migrate-vault')
   @HttpCode(HttpStatus.OK)
   async migrateVault(@CurrentUser() user: { id: string }) {

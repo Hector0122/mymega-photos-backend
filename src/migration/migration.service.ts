@@ -198,6 +198,31 @@ export class MigrationService {
     return { moved };
   }
 
+  async fixVideoThumbnails(): Promise<{ checked: number; fixed: number }> {
+    const bucket = this.getBucket();
+    const videos = await this.prisma.photo.findMany({
+      where: { mimeType: { startsWith: 'video/' }, thumbS3Key: { not: null } },
+      select: { id: true, thumbS3Key: true, s3Key: true },
+    });
+
+    let fixed = 0;
+    for (const video of videos) {
+      if (!video.thumbS3Key) continue;
+      try {
+        await this.s3.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: video.thumbS3Key }),
+        );
+      } catch {
+        await this.prisma.photo.update({
+          where: { id: video.id },
+          data: { thumbS3Key: null },
+        });
+        fixed++;
+      }
+    }
+    return { checked: videos.length, fixed };
+  }
+
   async migrateVault(userId: string): Promise<{ moved: number }> {
     const privates = await this.prisma.photo.findMany({
       where: { userId, deletedAt: null, private: true },

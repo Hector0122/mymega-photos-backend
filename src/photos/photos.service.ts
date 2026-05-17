@@ -100,10 +100,11 @@ export class PhotosService {
       if (!b) return;
 
       if (msg.type === 'progress') {
-        b.status = 'processing';
+        b.status = msg.message.startsWith('Error') ? 'error' : 'processing';
         b.completed = msg.completed;
         b.failed = msg.failed;
         b.message = msg.message;
+        if (msg.message.startsWith('Error')) this.logger.warn(msg.message)
       } else if (msg.type === 'done') {
         b.status = 'done';
         b.completed = msg.completed;
