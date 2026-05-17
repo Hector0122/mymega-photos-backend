@@ -23,11 +23,20 @@ export class DeviceTokenController {
   ) {
     if (!body.token) return { ok: false, error: 'token is required' };
 
-    await this.prisma.deviceToken.upsert({
-      where: { userId_token: { userId: user.id, token: body.token } },
-      create: { userId: user.id, token: body.token },
-      update: {},
+    const existing = await this.prisma.deviceToken.findFirst({
+      where: { userId: user.id, token: body.token },
     })
+
+    if (existing) {
+      await this.prisma.deviceToken.update({
+        where: { id: existing.id },
+        data: { token: body.token },
+      })
+    } else {
+      await this.prisma.deviceToken.create({
+        data: { userId: user.id, token: body.token },
+      })
+    }
     return { ok: true };
   }
 }
