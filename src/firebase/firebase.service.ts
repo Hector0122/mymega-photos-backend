@@ -11,16 +11,34 @@ export class FirebaseService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
 
   onModuleInit() {
-    const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-    if (!serviceAccountPath) {
+    const jsonStr = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    let serviceAccount: admin.ServiceAccount | undefined;
+    if (jsonStr) {
+      try {
+        serviceAccount = JSON.parse(jsonStr);
+      } catch {
+        this.logger.error('FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON');
+      }
+    } else {
+      const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+      if (serviceAccountPath) {
+        try {
+          const resolvedPath = path.resolve(process.cwd(), serviceAccountPath);
+          serviceAccount = JSON.parse(
+            fs.readFileSync(resolvedPath, 'utf-8'),
+          );
+        } catch (err) {
+          this.logger.error('Failed to read Firebase service account file', err);
+        }
+      }
+    }
+    if (!serviceAccount) {
       this.logger.warn(
-        'FIREBASE_SERVICE_ACCOUNT_PATH not set — push notifications disabled',
+        'FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_SERVICE_ACCOUNT_PATH not set — push notifications disabled',
       );
       return;
     }
     try {
-      const resolvedPath = path.resolve(process.cwd(), serviceAccountPath);
-      const serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'));
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
