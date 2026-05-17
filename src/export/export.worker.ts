@@ -104,7 +104,7 @@ async function run(input: ExportWorkerInput) {
   );
 
   const mailgunDomain = process.env.SMTP_USER?.split('@')[1];
-  const mailgunApiKey = process.env.SMTP_PASS;
+  const mailgunApiKey = process.env.MAILGUN_API_KEY || process.env.SMTP_PASS;
   if (mailgunDomain && mailgunApiKey && userEmail) {
     try {
       sendProgress(photos.length, photos.length, `Enviando correo…`);
