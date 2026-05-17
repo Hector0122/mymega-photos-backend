@@ -17,7 +17,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import { Worker } from 'worker_threads';
 import { PrismaService } from '../prisma.service';
-import { S3_CLIENT } from '../common/s3.provider';
+import { S3_CLIENT, publicObjectUrl } from '../common/s3.provider';
 import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
@@ -76,9 +76,10 @@ export class PhotosService {
       size: f.size,
     }));
 
+    const r2AccountId = process.env.R2_ACCOUNT_ID;
     const workerPath = path.join(__dirname, 'upload.worker.js');
     const worker = new Worker(workerPath, {
-      workerData: { batchId, userId, files: workerFiles, bucket, region },
+      workerData: { batchId, userId, files: workerFiles, bucket, region, r2AccountId },
     });
 
     worker.on('message', (msg: any) => {
@@ -123,8 +124,8 @@ export class PhotosService {
   }
 
   private getBucket(): string {
-    const bucket = process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('AWS_S3_BUCKET env variable is required');
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
     return bucket;
   }
 
@@ -234,7 +235,7 @@ export class PhotosService {
       }),
     );
 
-    const url = `https://${bucket}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${fullKey}`;
+    const url = publicObjectUrl(bucket, fullKey);
 
     const [blurResult, pHash] = await Promise.all([
       this.computeBlurScore(buffer),

@@ -13,8 +13,8 @@ export class AnalysisService {
   ) {}
 
   private getBucket(): string {
-    const bucket = process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('AWS_S3_BUCKET env variable is required');
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
     return bucket;
   }
 

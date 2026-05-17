@@ -17,7 +17,7 @@ export class AlbumsService {
   ) {}
 
   async list(userId: string) {
-    const bucket = process.env.AWS_S3_BUCKET;
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
     const albums = await this.prisma.album.findMany({
       where: { userId, vault: false },
       include: { _count: { select: { photos: true } } },
@@ -115,7 +115,7 @@ export class AlbumsService {
       if (vaultWithNew) vault = vaultWithNew;
     }
 
-    const bucket = process.env.AWS_S3_BUCKET;
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
     if (!bucket) return vault as any;
 
     const presignExpiry = 604800;
@@ -234,8 +234,8 @@ export class AlbumsService {
   }
 
   async getPhotos(userId: string, albumId: string) {
-    const bucket = process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('AWS_S3_BUCKET env variable is required');
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
 
     const albumMeta = await this.prisma.album.findFirst({
       where: { id: albumId, userId },

@@ -11,6 +11,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT } from '../common/s3.provider';
+import { publicObjectUrl } from '../common/s3.provider';
 import { FirebaseService } from '../firebase/firebase.service';
 import { ExportProgress } from './export.types';
 
@@ -78,9 +79,9 @@ export class ExportService {
     photos: { s3Key: string; filename: string }[],
     label: string,
   ): Promise<{ exportId: string }> {
-    const bucket = process.env.AWS_S3_BUCKET;
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
     const region = process.env.AWS_REGION || 'us-east-1';
-    if (!bucket) throw new NotFoundException('AWS_S3_BUCKET not configured');
+    if (!bucket) throw new NotFoundException('R2_BUCKET_NAME or AWS_S3_BUCKET not configured');
 
     const exportId = crypto.randomUUID();
     const progress: ExportProgress = {
@@ -103,6 +104,7 @@ export class ExportService {
         label,
         bucket,
         region,
+        r2AccountId: process.env.R2_ACCOUNT_ID,
         userEmail: user?.email,
       },
     });

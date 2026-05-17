@@ -10,7 +10,7 @@ import {
 } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma.service';
-import { S3_CLIENT } from '../common/s3.provider';
+import { S3_CLIENT, publicObjectUrl } from '../common/s3.provider';
 
 @Injectable()
 export class MigrationService {
@@ -20,8 +20,8 @@ export class MigrationService {
   ) {}
 
   private getBucket(): string {
-    const bucket = process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('AWS_S3_BUCKET env variable is required');
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
     return bucket;
   }
 
@@ -73,7 +73,7 @@ export class MigrationService {
         const createdAt =
           !isNaN(ts) && ts > 0 ? new Date(ts) : lastModified || new Date();
         const filename = lastPart.split('-').slice(1).join('-') || lastPart;
-        const url = `https://${bucket}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
+        const url = publicObjectUrl(bucket, key);
 
         await this.prisma.photo.create({
           data: {

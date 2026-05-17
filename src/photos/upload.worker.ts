@@ -13,15 +13,21 @@ interface UploadWorkerInput {
   files: { path: string; filename: string; mimeType: string; size: number }[];
   bucket: string;
   region: string;
+  r2AccountId?: string;
 }
 
 async function run(input: UploadWorkerInput) {
-  const { batchId, userId, files, bucket, region } = input;
+  const { batchId, userId, files, bucket, region, r2AccountId } = input;
+  const r2Endpoint = r2AccountId
+    ? `https://${r2AccountId}.r2.cloudflarestorage.com`
+    : undefined;
   const s3 = new S3Client({
-    region,
+    region: r2Endpoint ? 'auto' : region,
+    endpoint: r2Endpoint,
+    forcePathStyle: !!r2Endpoint,
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      accessKeyId: process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY!,
     },
     requestHandler: {
       requestTimeout: 300_000,
@@ -67,7 +73,9 @@ async function run(input: UploadWorkerInput) {
         }),
       );
 
-      const url = `https://${bucket}.s3.${region}.amazonaws.com/${fullKey}`;
+      const url = r2Endpoint
+        ? `${r2Endpoint}/${bucket}/${fullKey}`
+        : `https://${bucket}.s3.${region}.amazonaws.com/${fullKey}`;
 
       if (isVideo) {
         const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}.jpg`;
