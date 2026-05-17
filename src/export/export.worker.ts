@@ -135,6 +135,11 @@ async function run(input: ExportWorkerInput) {
         `,
       });
     } catch (e) {
+      parentPort?.postMessage({
+        type: 'smtp_error',
+        exportId,
+        message: (e as Error).message,
+      });
       sendProgress(photos.length, photos.length, `Correo omitido: ${(e as Error).message}`);
     }
   }

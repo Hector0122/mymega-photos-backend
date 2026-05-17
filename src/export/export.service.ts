@@ -128,6 +128,9 @@ export class ExportService {
           .catch((err) =>
             this.logger.error('Firebase notification error', err),
           );
+      } else if (msg.type === 'smtp_error') {
+        this.logger.error(`Export ${exportId} SMTP error: ${msg.message}`);
+        p.message = `Correo no enviado: ${msg.message}`;
       } else if (msg.type === 'error') {
         p.status = 'error';
         p.message = msg.message;
