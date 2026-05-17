@@ -19,8 +19,16 @@ export class AuthService {
     private jwt: JwtService,
   ) {}
 
-  private async generateTokens(user: { id: string; email: string; name: string }) {
-    const token = this.jwt.sign({ sub: user.id, email: user.email, name: user.name });
+  private async generateTokens(user: {
+    id: string;
+    email: string;
+    name: string;
+  }) {
+    const token = this.jwt.sign({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+    });
     const refreshToken = crypto.randomBytes(40).toString('hex');
     const hashed = await bcrypt.hash(refreshToken, 10);
     await this.prisma.user.update({
@@ -42,7 +50,10 @@ export class AuthService {
     });
 
     const tokens = await this.generateTokens(user);
-    return { ...tokens, user: { id: user.id, email: user.email, name: user.name } };
+    return {
+      ...tokens,
+      user: { id: user.id, email: user.email, name: user.name },
+    };
   }
 
   async login(dto: LoginDto) {
@@ -55,7 +66,10 @@ export class AuthService {
     if (!valid) throw new UnauthorizedException('Invalid credentials');
 
     const tokens = await this.generateTokens(user);
-    return { ...tokens, user: { id: user.id, email: user.email, name: user.name } };
+    return {
+      ...tokens,
+      user: { id: user.id, email: user.email, name: user.name },
+    };
   }
 
   async refresh(refreshToken: string) {
@@ -66,7 +80,10 @@ export class AuthService {
 
     let matched: (typeof users)[0] | null = null;
     for (const u of users) {
-      if (u.refreshToken && await bcrypt.compare(refreshToken, u.refreshToken)) {
+      if (
+        u.refreshToken &&
+        (await bcrypt.compare(refreshToken, u.refreshToken))
+      ) {
         matched = u;
         break;
       }
@@ -74,7 +91,10 @@ export class AuthService {
     if (!matched) throw new UnauthorizedException('Invalid refresh token');
 
     const tokens = await this.generateTokens(matched);
-    return { ...tokens, user: { id: matched.id, email: matched.email, name: matched.name } };
+    return {
+      ...tokens,
+      user: { id: matched.id, email: matched.email, name: matched.name },
+    };
   }
 
   async logout(userId: string) {

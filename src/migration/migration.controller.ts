@@ -1,0 +1,40 @@
+import {
+  Controller,
+  Post,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { MigrationService } from './migration.service';
+
+@Controller()
+@UseGuards(JwtAuthGuard)
+export class MigrationController {
+  constructor(private readonly migrationService: MigrationService) {}
+
+  @Post('photos/migrate-thumbnails')
+  @HttpCode(HttpStatus.OK)
+  async migrateThumbnails() {
+    return this.migrationService.generateMissingThumbnails();
+  }
+
+  @Post('photos/migrate-folders')
+  @HttpCode(HttpStatus.OK)
+  async migrateFolders() {
+    return this.migrationService.migrateToFolders();
+  }
+
+  @Post('photos/sync-s3')
+  @HttpCode(HttpStatus.OK)
+  async syncS3() {
+    return this.migrationService.syncS3ToDb();
+  }
+
+  @Post('photos/migrate-vault')
+  @HttpCode(HttpStatus.OK)
+  async migrateVault(@CurrentUser() user: { id: string }) {
+    return this.migrationService.migrateVault(user.id);
+  }
+}

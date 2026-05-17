@@ -51,7 +51,10 @@ describe('AuthService', () => {
     it('should create user and return tokens', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       prisma.user.create.mockResolvedValue(mockUser);
-      prisma.user.update.mockResolvedValue({ ...mockUser, refreshToken: 'hashed-rt' });
+      prisma.user.update.mockResolvedValue({
+        ...mockUser,
+        refreshToken: 'hashed-rt',
+      });
 
       const result = await service.register({
         email: 'test@test.com',
@@ -63,7 +66,11 @@ describe('AuthService', () => {
       expect(result.refreshToken).toBeTruthy();
       expect(result.user.email).toBe('test@test.com');
       expect(prisma.user.create).toHaveBeenCalledWith({
-        data: { email: 'test@test.com', name: 'Test', password: 'hashed-password' },
+        data: {
+          email: 'test@test.com',
+          name: 'Test',
+          password: 'hashed-password',
+        },
       });
     });
 
@@ -71,7 +78,11 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(
-        service.register({ email: 'test@test.com', name: 'Test', password: 'password123' }),
+        service.register({
+          email: 'test@test.com',
+          name: 'Test',
+          password: 'password123',
+        }),
       ).rejects.toThrow(ConflictException);
     });
   });
@@ -79,7 +90,10 @@ describe('AuthService', () => {
   describe('login', () => {
     it('should return tokens for valid credentials', async () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
-      prisma.user.update.mockResolvedValue({ ...mockUser, refreshToken: 'hashed-rt' });
+      prisma.user.update.mockResolvedValue({
+        ...mockUser,
+        refreshToken: 'hashed-rt',
+      });
 
       const result = await service.login({
         email: 'test@test.com',
@@ -111,10 +125,18 @@ describe('AuthService', () => {
   describe('refresh', () => {
     it('should rotate tokens when refresh token is valid', async () => {
       const users = [
-        { id: 'user-1', email: 'test@test.com', name: 'Test', refreshToken: 'hashed-rt' },
+        {
+          id: 'user-1',
+          email: 'test@test.com',
+          name: 'Test',
+          refreshToken: 'hashed-rt',
+        },
       ];
       prisma.user.findMany.mockResolvedValue(users);
-      prisma.user.update.mockResolvedValue({ ...users[0], refreshToken: 'new-hashed-rt' });
+      prisma.user.update.mockResolvedValue({
+        ...users[0],
+        refreshToken: 'new-hashed-rt',
+      });
 
       const result = await service.refresh('valid-refresh-token');
 
@@ -126,7 +148,9 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException for invalid refresh token', async () => {
       prisma.user.findMany.mockResolvedValue([]);
 
-      await expect(service.refresh('invalid-token')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('invalid-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 

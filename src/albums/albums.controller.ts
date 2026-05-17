@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -23,6 +24,11 @@ export class AlbumsController {
     return this.albums.list(user.id);
   }
 
+  @Get('vault')
+  async getVault(@CurrentUser() user: { id: string }) {
+    return this.albums.getVault(user.id);
+  }
+
   @Post()
   async create(
     @CurrentUser() user: { id: string },
@@ -31,11 +37,29 @@ export class AlbumsController {
     return this.albums.create(user.id, body.name);
   }
 
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  async update(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Body() body: { name?: string; coverPhotoId?: string | null },
+  ) {
+    return this.albums.update(user.id, id, body);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async delete(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     await this.albums.delete(user.id, id);
     return { deleted: true };
+  }
+
+  @Get(':id/photos')
+  async getPhotos(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.albums.getPhotos(user.id, id);
   }
 
   @Post(':id/photos')

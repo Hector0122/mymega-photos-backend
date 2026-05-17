@@ -16,6 +16,18 @@ model User {
 
   photos    Photo[]
   albums    Album[]
+  deviceTokens DeviceToken[]
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  token     String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, token])
+  @@index([userId])
 }
 
 model Album {
@@ -23,7 +35,9 @@ model Album {
   name      String
   userId    String
   user      User     @relation(fields: [userId], references: [id])
+  coverPhotoId String?
   photos    Photo[]
+  vault     Boolean  @default(false)
   createdAt DateTime @default(now())
 
   @@index([userId])
@@ -40,13 +54,13 @@ model Photo {
   mimeType  String
   size      Int
 
-  lat       Float?
-  lng       Float?
   favorite  Boolean  @default(false)
   tags      String[]
   blurred   Boolean  @default(false)
   blurScore Float?
   perceptualHash String?
+  deletedAt DateTime?
+  private   Boolean  @default(false)
 
   createdAt DateTime @default(now())
 

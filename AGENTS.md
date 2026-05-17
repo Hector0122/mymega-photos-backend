@@ -104,7 +104,7 @@ adb reverse tcp:3000 tcp:3000   # proxy :3000 to device
 - Albums module: `GET /albums`, `POST /albums`, `DELETE /albums/:id`, `POST /albums/:id/photos`, `DELETE /albums/:id/photos`
 - Search: `GET /photos?q=` — searches filename with case-insensitive contains
 - Image editing: crop to square before upload via `@react-native-community/image-editor`
-- Geolocation: GPS extracted from EXIF on upload (if available), stored as `lat`/`lng` in DB, `GET /photos/geo` returns geotagged photos, Map tab with markers via `react-native-maps`
+- ~~Geolocation: GPS extracted from EXIF on upload (if available), stored as `lat`/`lng` in DB, `GET /photos/geo` returns geotagged photos, Map tab with markers via `react-native-maps`~~ Removed.
 
 ## Coding conventions
 

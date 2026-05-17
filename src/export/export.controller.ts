@@ -1,0 +1,55 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  HttpCode,
+  HttpStatus,
+  BadRequestException,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { ExportService } from './export.service';
+
+@Controller()
+@UseGuards(JwtAuthGuard)
+export class ExportController {
+  constructor(private readonly exportService: ExportService) {}
+
+  @Get('exports/:id')
+  getExportStatus(@Param('id') id: string) {
+    return this.exportService.getExportStatus(id);
+  }
+
+  @Post('photos/export')
+  @HttpCode(HttpStatus.OK)
+  async exportPhotos(@CurrentUser() user: { id: string }) {
+    return this.exportService.startAllExport(user.id);
+  }
+
+  @Post('albums/:id/export')
+  @HttpCode(HttpStatus.OK)
+  async exportAlbum(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.exportService.startAlbumExport(user.id, id);
+  }
+
+  @Post('photos/export-by-date')
+  @HttpCode(HttpStatus.OK)
+  async exportByDate(
+    @CurrentUser() user: { id: string },
+    @Body() body: { dateFrom: string; dateTo: string },
+  ) {
+    if (!body.dateFrom || !body.dateTo)
+      throw new BadRequestException('dateFrom and dateTo are required');
+    return this.exportService.startDateExport(
+      user.id,
+      body.dateFrom,
+      body.dateTo,
+    );
+  }
+}
