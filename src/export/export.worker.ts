@@ -10,7 +10,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 const req = createRequire(__filename);
-const nodemailer = req('nodemailer');
 
 interface ExportWorkerInput {
   exportId: string;
@@ -37,7 +36,7 @@ async function run(input: ExportWorkerInput) {
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY!,
     },
     requestHandler: {
-      requestTimeout: 300_000,
+      requestTimeout: 600_000,
     },
   });
 
@@ -62,7 +61,7 @@ async function run(input: ExportWorkerInput) {
   const archive = new ZipArchive({ zlib: { level: 5 } });
   archive.pipe(output);
 
-  sendProgress(0, photos.length, `Descargando fotos de S3…`);
+  sendProgress(0, photos.length, `Descargando fotos…`);
 
   for (let i = 0; i < photos.length; i++) {
     try {
@@ -75,11 +74,7 @@ async function run(input: ExportWorkerInput) {
     } catch {
       /* ignore */
     }
-    sendProgress(
-      i + 1,
-      photos.length,
-      `Descargando foto ${i + 1} de ${photos.length}`,
-    );
+    sendProgress(i + 1, photos.length, `Foto ${i + 1} de ${photos.length}`);
   }
 
   sendProgress(photos.length, photos.length, `Comprimiendo ZIP…`);
@@ -89,7 +84,7 @@ async function run(input: ExportWorkerInput) {
     output.on('error', reject);
   });
 
-  sendProgress(photos.length, photos.length, `Subiendo ZIP a la nube…`);
+  sendProgress(photos.length, photos.length, `Subiendo ZIP…`);
   const zipBuffer = fs.readFileSync(tmpPath);
   fs.unlinkSync(tmpPath);
 
@@ -110,37 +105,45 @@ async function run(input: ExportWorkerInput) {
 
   const smtpHost = process.env.SMTP_HOST;
   if (smtpHost && userEmail) {
-    sendProgress(photos.length, photos.length, `Enviando correo…`);
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      auth: {
-        user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASS || '',
-      },
-    });
-    const safeUrl = downloadUrl.replace(/&/g, '&amp;');
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'noreply@mymega.com',
-      to: userEmail,
-      subject: `Exportación de ${label} - MyMega Photos`,
-      html: `
-        <h2>Exportación completada</h2>
-        <p>Tu exportación de ${label} con ${photos.length} foto(s) está lista.</p>
-        <p>Haz clic aquí para descargar (válido por 24 horas):</p>
-        <p><a href="${safeUrl}" style="display:inline-block;padding:14px 32px;background:#4F46E5;color:#fff;text-decoration:none;border-radius:8px;font-size:16px">Descargar ZIP</a></p>
-        <p>O copia este enlace en tu navegador:</p>
-        <p style="word-break:break-all;font-size:12px;color:#666">${safeUrl}</p>
-        <p>Saludos,<br>El equipo de MyMega Photos</p>
-      `,
-    });
+    try {
+      sendProgress(photos.length, photos.length, `Enviando correo…`);
+      const nodemailer = req('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: parseInt(process.env.SMTP_PORT || '587'),
+        auth: {
+          user: process.env.SMTP_USER || '',
+          pass: process.env.SMTP_PASS || '',
+        },
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 60000,
+      });
+      const safeUrl = downloadUrl.replace(/&/g, '&amp;');
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM || 'noreply@mymega.com',
+        to: userEmail,
+        subject: `Exportación de ${label} - MyMega Photos`,
+        html: `
+          <h2>Exportación completada</h2>
+          <p>Tu exportación de ${label} con ${photos.length} foto(s) está lista.</p>
+          <p>Haz clic aquí para descargar (válido por 24 horas):</p>
+          <p><a href="${safeUrl}" style="display:inline-block;padding:14px 32px;background:#4F46E5;color:#fff;text-decoration:none;border-radius:8px;font-size:16px">Descargar ZIP</a></p>
+          <p>O copia este enlace en tu navegador:</p>
+          <p style="word-break:break-all;font-size:12px;color:#666">${safeUrl}</p>
+          <p>Saludos,<br>El equipo de MyMega Photos</p>
+        `,
+      });
+    } catch (e) {
+      sendProgress(photos.length, photos.length, `Correo omitido: ${(e as Error).message}`);
+    }
   }
 
   parentPort?.postMessage({
     type: 'done',
     exportId,
     downloadUrl,
-    message: `Exportación de ${label} completada.${smtpHost && userEmail ? ` Revisa tu correo en ${userEmail}` : ' Enlace generado.'}`,
+    message: `Exportación de ${label} completada.${smtpHost && userEmail ? ' Revisa tu correo.' : ''}`,
   });
 }
 
