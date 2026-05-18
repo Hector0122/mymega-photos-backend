@@ -2,69 +2,125 @@
 
 ## Project overview
 
-Photo-sharing app: React Native frontend (Android) + NestJS backend, photos stored in Cloudflare R2 with server-side thumbnail generation.
+Photo-sharing app: React Native frontend (Android) + NestJS backend + Supabase (PostgreSQL) + Cloudflare R2 (S3-compatible storage). Server-side thumbnail generation via `sharp`, AI analysis (blur + perceptual hash), push notifications (Firebase), and email export via Mailgun.
 
-## Repo structure
+## Project structure
 
 ```
-.
-├── frontend/                  # React Native 0.83.1 app
-│   ├── pages/
-│   │   ├── Login/             # Login / Register screen
-│   │   ├── Home/              # Masonry grid of photo thumbnails, grouped by date
-│   │   ├── Upload/            # Pick photo from gallery → multipart/FormData → POST to backend
-│   │   └── PhotoPreview/      # Full-image view, download (RNFS), share, delete
-│   ├── api/
-│   │   ├── auth.ts            # Auth API (login/register calls)
-│   │   ├── client.ts          # Authenticated API client (JWT Bearer header)
-│   │   ├── cache.ts           # AsyncStorage photo cache
-│   │   └── server/            # Base API client (BASE_URL)
-│   ├── context/
-│   │   └── AuthContext.tsx     # Auth state + login/register/logout
-│   ├── types/                 # TS declarations
-│   ├── App.tsx                # Stack + Tab navigator + conditional auth flow
-│   └── android/               # Android native project
-└── mymega-photos-backend/     # NestJS 11 API
+PersonalProject/
+├── AI_PLAN.md
+├── FEATURES.md
+├── frontend/                       # React Native 0.83.1
+└── mymega-photos-backend/          # NestJS 11 API <-- YOU ARE HERE
     ├── src/
-    │   ├── main.ts            # Bootstrap + 50MB json limit + CORS
-    │   ├── app.module.ts      # Module definition + global ValidationPipe
-    │   ├── app.controller.ts  # 8 routes (CRUD + migrations + sync-s3)
-    │   ├── app.service.ts     # S3 client, sharp, Prisma CRUD
-    │   ├── prisma.service.ts  # PrismaClient wrapper (extends PrismaClient)
-    │   └── auth/
-    │       ├── auth.module.ts
-    │       ├── auth.controller.ts
-    │       ├── auth.service.ts
-    │       ├── jwt.strategy.ts
-    │       ├── jwt-auth.guard.ts
-    │       └── current-user.decorator.ts
+    │   ├── main.ts                 # Bootstrap + CORS + 500MB body limit + PrismaModule
+    │   ├── app.module.ts           # Root module (imports: Auth, Albums, Photos, Export, Analysis, Migration, Firebase, Common)
+    │   ├── app.controller.ts       # Legacy routes
+    │   ├── app.service.ts          # Legacy S3/sharp logic
+    │   ├── prisma.module.ts        # Global PrismaModule (@Global()) — singleton, prevents duplicate connections
+    │   ├── prisma.service.ts       # PrismaClient wrapper
+    │   │
+    │   ├── auth/                   # JWT auth + refresh tokens
+    │   │   ├── auth.module.ts      # PassportModule + JwtModule + ThrottlerModule
+    │   │   ├── auth.controller.ts  # POST /auth/login, /register, /refresh, /logout
+    │   │   ├── auth.service.ts     # bcrypt hash/verify, JWT sign, refresh rotation (40B hex)
+    │   │   ├── auth.service.spec.ts
+    │   │   ├── jwt.strategy.ts     # Passport JWT strategy (no fallback secret)
+    │   │   ├── jwt-auth.guard.ts   # @UseGuards(JwtAuthGuard)
+    │   │   ├── current-user.decorator.ts  # @CurrentUser() param decorator
+    │   │   ├── skip-auth.decorator.ts     # @SkipAuth() for public routes (e.g. /photos/:id/stream)
+    │   │   └── dto/                # LoginDto, RegisterDto, RefreshTokenDto, UpdateProfileDto
+    │   │
+    │   ├── albums/                 # Album CRUD with many-to-many Photo relation
+    │   │   ├── albums.module.ts
+    │   │   ├── albums.controller.ts
+    │   │   └── albums.service.ts
+    │   │
+    │   ├── photos/                 # Photo management (bulk of endpoints)
+    │   │   ├── photos.module.ts
+    │   │   ├── photos.controller.ts  # 20+ endpoints
+    │   │   ├── photos.service.ts     # Business logic
+    │   │   └── upload.worker.ts      # Worker thread: S3 upload, sharp thumbnails, ffmpeg video thumbs, blur score, perceptual hash
+    │   │
+    │   ├── export/                 # ZIP export + email via Mailgun
+    │   │   ├── export.module.ts
+    │   │   ├── export.controller.ts  # POST /photos/export, /albums/:id/export, /photos/export-by-date, GET /exports/:id
+    │   │   ├── export.service.ts     # In-memory export state, spawns worker, sends push notification on completion
+    │   │   ├── export.worker.ts      # Worker thread: download from R2, archiver ZIP, upload to R2, email via Mailgun
+    │   │   └── export.types.ts       # ExportProgress interface
+    │   │
+    │   ├── analysis/               # Image analysis (blur + perceptual hash)
+    │   │   ├── analysis.module.ts
+    │   │   ├── analysis.controller.ts  # POST /photos/analyze-all, /photos/:id/analyze, GET /photos/duplicates
+    │   │   └── analysis.service.ts     # computeBlurScore (gradient variance), computePerceptualHash (64-bit dhash)
+    │   │
+    │   ├── migration/              # S3 → DB migration utilities
+    │   │   ├── migration.module.ts
+    │   │   ├── migration.controller.ts  # 5 endpoints
+    │   │   └── migration.service.ts     # syncS3ToDb, generateMissingThumbnails, migrateToFolders, fixVideoThumbnails, migrateVault
+    │   │
+    │   ├── firebase/               # Push notifications (Firebase Admin SDK)
+    │   │   ├── firebase.module.ts
+    │   │   ├── firebase.service.ts     # sendToUser(userId, payload), sendToAllUsers
+    │   │   └── device-token.controller.ts  # POST /device-token
+    │   │
+    │   └── common/                 # Shared modules
+    │       ├── s3.module.ts
+    │       ├── s3.provider.ts      # S3 client factory (R2 if R2_ACCOUNT_ID set, else AWS)
+    │       └── exception.filter.ts # Global catch-all filter
+    │
     ├── prisma/
-    │   ├── schema.prisma      # User + Photo models with relation
-    │   └── migrations/        # 3 SQL migrations (init, metadata, user)
-    ├── prisma.config.ts       # Prisma config (DATABASE_URL)
-    └── .env                   # AWS credentials + DATABASE_URL (not tracked)
+    │   ├── schema.prisma          # 4 models: User, Photo, Album, DeviceToken
+    │   ├── seed.ts                # Demo user (configurable via DEMO_EMAIL, DEMO_PASSWORD, DEMO_NAME)
+    │   └── migrations/            # 13 SQL migrations
+    │
+    └── prisma.config.ts           # DATABASE_URL config
 ```
 
 ## Key technical decisions
 
-- **`adb reverse tcp:3000 tcp:3000`** — device reaches backend via USB, no WiFi dependency
-- **Server-side thumbnails** via `sharp` (300px, 70% quality, `thumb-{key}`) instead of client-side
-- **Photo date** derived from timestamp in S3 key (`{ts}-filename.ext`); falls back to `LastModified` then today
-- **Filename** extracted from URL path by stripping `thumb-` prefix to derive the original S3 key
+- **adb reverse tcp:3000 tcp:3000** — device reaches backend via USB
+- **Server-side thumbnails** via `sharp` (300px, 70% quality) + `fluent-ffmpeg` for videos
+- **Blur detection**: downsample to 800x800, grayscale, gradient variance; score < 10 = blurred
+- **Perceptual hash**: 8x8 grayscale, average-threshold, 64-bit hex for duplicate detection
+- **Worker threads** (`upload.worker.ts`, `export.worker.ts`) — CPU-heavy tasks off main thread
+- **S3/R2**: auto-detects Cloudflare R2 if `R2_ACCOUNT_ID` set, else falls back to AWS S3
+- **Mailgun** for export emails (not nodemailer)
+- **Refresh token rotation**: 40-byte hex, hashed in DB, one-time use
+- **500MB** max file size (not 20MB)
 - **Gradle 8.13** required (9.0.0 has `IBM_SEMERU` `NoSuchFieldError` with JDK 21)
+
+## Environment variables
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | ✅ | — | Supabase PostgreSQL |
+| `JWT_SECRET` | ✅ | — | No fallback — app crashes if missing |
+| `R2_ACCOUNT_ID` | ✅ | — | Cloudflare R2 account |
+| `R2_ACCESS_KEY_ID` | ✅ | — | R2 access key |
+| `R2_SECRET_ACCESS_KEY` | ✅ | — | R2 secret key |
+| `R2_BUCKET_NAME` | ✅ | — | R2 bucket |
+| `R2_PUBLIC_URL` | ✅ | — | R2 public URL |
+| `DEMO_EMAIL` | ❌ | `demo@vaulta.com` | Demo account email |
+| `DEMO_PASSWORD` | ❌ | `123456` | Demo account password |
+| `DEMO_NAME` | ❌ | `Demo User` | Demo account name |
+| `AUTO_SYNC_S3` | ❌ | — | Set to `true` to sync S3 on startup |
+| `MAILGUN_API_KEY` | ❌ | — | For email export |
+| `SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` | ❌ | — | Alternative to Mailgun |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | ❌ | — | Firebase Admin SDK credentials (JSON string) |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | ❌ | — | Or path to JSON file |
 
 ## Common commands
 
 ### Backend
-
 ```bash
 cd mymega-photos-backend
 npm run build          # compile TS
 npm run start:dev      # watch mode on :3000
+npm run test           # run tests
 ```
 
 ### Frontend
-
 ```bash
 cd frontend
 yarn start             # Metro bundler on :8081
@@ -73,43 +129,50 @@ npx tsc --noEmit       # type-check
 ```
 
 ### Device connection
-
 ```bash
-adb devices            # verify device
-adb reverse tcp:3000 tcp:3000   # proxy :3000 to device
+adb devices
+adb reverse tcp:3000 tcp:3000
 ```
 
 ## Important gotchas
 
 - Backend must be restarted after every change (`npm run build` + restart)
 - `adb reverse` must be re-run after USB disconnect
-- Metro hot-reload works for JS changes; native code changes need `yarn android`
-- `GET /photos?maxKeys=50&pageToken=` returns `{ photos: { uri, date }[], nextToken: string | null }` (paginated via Prisma cursor, token is photo `id` — old S3 ContinuationToken no longer used)
-- All `/photos/*` routes require JWT Bearer token in `Authorization` header
-- Upload screen shows a green banner "Foto subida correctamente" at top and auto-navigates to Home after 800ms (no Alert)
-- `POST /photos/sync-s3` imports existing S3 photos into DB (needs at least 1 user registered)
-- Migration endpoints: `POST /photos/migrate-thumbnails`, `POST /photos/migrate-folders`, `POST /photos/sync-s3`
-- `JWT_SECRET` env var configures the JWT signing key
-- `DATABASE_URL` must point to a running Postgres instance with migrations applied
+- All `/photos/*` routes require JWT Bearer except `GET /photos/:id/stream` (has `@SkipAuth`, accepts token as `?token=` query param)
+- `GET /photos` paginates via Prisma cursor (photo `id`), not S3 ContinuationToken
+- `GET /photos/trash` returns soft-deleted photos (`deletedAt != null`)
+- `POST /photos/sync-s3` imports existing S3 photos into DB (assigned to first user)
+- Migration endpoints: `migrate-thumbnails`, `migrate-folders`, `sync-s3`, `fix-video-thumbnails`, `migrate-vault`
+- `POST /device-token` upserts FCM tokens (findFirst + create/update — avoids Prisma v7 composite key issue)
+- `DELETE /photos/trash/:id` permanently deletes from S3 + DB (no recovery)
+- `DELETE /photos/:id` is soft-delete (sets `deletedAt`), can be restored via `POST /photos/:id/restore`
+- Export worker uses Mailgun. If Mailgun is not configured, it falls back to SMTP env vars.
+- `GET /photos/:id/stream` supports byte-range for video seeking
+- CORS: `origin` from env var or `true` (not `'*'`), `credentials: false`
 
 ## Recent changes
 
-- Prisma fully integrated: photos saved/read/deleted from Postgres (cursor-based pagination)
-- User model added with relation to Photo (userId foreign key)
-- JWT authentication: `POST /auth/register`, `POST /auth/login`, all photo routes protected
-- Frontend auth: Login/Register screen, AuthContext, JWT token in AsyncStorage
-- `POST /photos/sync-s3` — backfill existing S3 photos into DB (assigned to first user)
-- Old: `GET /photos` paginated via S3 ContinuationToken → Now: cursor-based via Prisma
-- Old: all routes public → Now: JWT Bearer required for `/photos/*`
-- Albums module: `GET /albums`, `POST /albums`, `DELETE /albums/:id`, `POST /albums/:id/photos`, `DELETE /albums/:id/photos`
-- Search: `GET /photos?q=` — searches filename with case-insensitive contains
-- Image editing: crop to square before upload via `@react-native-community/image-editor`
-- ~~Geolocation: GPS extracted from EXIF on upload (if available), stored as `lat`/`lng` in DB, `GET /photos/geo` returns geotagged photos, Map tab with markers via `react-native-maps`~~ Removed.
+- Moved from single `app.service.ts` to modular architecture: `photos/`, `export/`, `analysis/`, `migration/`, `firebase/`, `common/`
+- Worker threads for upload processing (thumbnails, blur, hash) and export (ZIP, email)
+- Video support: thumbnails via ffmpeg, byte-range streaming, `ALLOWED_MIMES` includes video types
+- Firebase push notifications: `DeviceToken` model, `sendToUser()`, triggered on export completion
+- Mailgun integration for export email (replaced nodemailer)
+- 500MB file size limit (was 20MB)
+- 13 database migrations (from init to device-token model)
+- SkipAuth decorator for public stream endpoint
+- Global exception filter
+
+## AI Plan (future)
+
+See `AI_PLAN.md` in root for:
+1. **Bulk upload script** — import 100GB from external drive directly to R2
+2. **AI auto-albums** — local Python sidecar using CLIP + clustering + Ollama to organize photos
+
+Both run on developer's laptop, $0 extra infrastructure cost.
 
 ## Coding conventions
 
 - TypeScript, strict mode
 - NestJS decorators for routes/DI
-- React Native functional components + hooks
 - No semicolons where possible, 2-space indent
 - No inline comments in code (unless absolutely necessary)
