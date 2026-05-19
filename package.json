@@ -20,9 +20,6 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "seed": "npx tsx prisma/seed.ts",
     "subir-masivo": "npx tsx scripts/bulk-upload.ts",
-    "organizar": "npx tsx scripts/organize.ts",
-    "organizar:preview": "npx tsx scripts/organize.ts --preview",
-    "organizar:clean": "npx tsx scripts/organize.ts --clean-only",
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {

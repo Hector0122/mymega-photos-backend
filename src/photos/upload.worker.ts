@@ -7,6 +7,8 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as exifr from 'exifr';
 const req = createRequire(__filename);
+const { computeBlurScore, computePerceptualHash } = req('../common/image-analysis');
+const { THUMB_RESIZE, THUMB_QUALITY } = req('../common/constants');
 
 interface UploadWorkerInput {
   batchId: string;
@@ -154,8 +156,8 @@ async function run(input: UploadWorkerInput) {
       } else {
         const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}`;
         const thumbBuffer = await sharp(buffer)
-          .resize(300)
-          .jpeg({ quality: 70 })
+          .resize(THUMB_RESIZE)
+          .jpeg({ quality: THUMB_QUALITY })
           .toBuffer();
 
         await s3.send(
@@ -167,40 +169,8 @@ async function run(input: UploadWorkerInput) {
           }),
         );
 
-        const { data, info } = await sharp(buffer)
-          .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-          .grayscale()
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-
-        let sum = 0;
-        let count = 0;
-        for (let y = 0; y < info.height; y++) {
-          for (let x = 0; x < info.width; x++) {
-            const idx = y * info.width + x;
-            let dx = 0,
-              dy = 0;
-            if (x > 0) dx = Math.abs(data[idx] - data[idx - 1]);
-            if (y > 0) dy = Math.abs(data[idx] - data[idx - info.width]);
-            sum += dx + dy;
-            count++;
-          }
-        }
-        const blurScore = sum / count;
-        const blurred = blurScore < 10;
-
-        const { data: hashData } = await sharp(buffer)
-          .resize(8, 8, { fit: 'cover' })
-          .grayscale()
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-        const avg = hashData.reduce((a, b) => a + b, 0) / hashData.length;
-        const hashBin = Array.from(hashData)
-          .map((v) => (v > avg ? '1' : '0'))
-          .join('');
-        const perceptualHash = BigInt('0b' + hashBin)
-          .toString(16)
-          .padStart(16, '0');
+        const { blurred, score: blurScore } = await computeBlurScore(buffer);
+        const perceptualHash = await computePerceptualHash(buffer);
 
         await prisma.photo.create({
           data: {
@@ -211,7 +181,7 @@ async function run(input: UploadWorkerInput) {
             mimeType: file.mimeType,
             size: file.size,
             blurred,
-            blurScore: Math.round(blurScore * 100) / 100,
+            blurScore,
             perceptualHash,
             createdAt: photoDate,
             userId,

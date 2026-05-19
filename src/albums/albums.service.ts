@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { S3_CLIENT } from '../common/s3.provider';
+import { S3_CLIENT, getBucketName } from '../common/s3.provider';
+import { PRESIGN_EXPIRY } from '../common/constants';
 import { PrismaService } from '../prisma.service';
 
 @Injectable()
@@ -46,7 +47,7 @@ export class AlbumsService {
                 Bucket: bucket,
                 Key: p.thumbS3Key || p.s3Key,
               }),
-              { expiresIn: 604800 },
+              { expiresIn: PRESIGN_EXPIRY },
             ),
           );
         }),
@@ -118,7 +119,7 @@ export class AlbumsService {
     const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
     if (!bucket) return vault as any;
 
-    const presignExpiry = 604800;
+    const presignExpiry = PRESIGN_EXPIRY;
     const results = await Promise.all(
       vault.photos.map(async (photo: any) => {
         const thumbKey = photo.thumbS3Key;
@@ -234,8 +235,7 @@ export class AlbumsService {
   }
 
   async getPhotos(userId: string, albumId: string) {
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
+    const bucket = getBucketName();
 
     const albumMeta = await this.prisma.album.findFirst({
       where: { id: albumId, userId },
@@ -257,7 +257,7 @@ export class AlbumsService {
     });
     if (!album) throw new NotFoundException('Album not found');
 
-    const presignExpiry = 604800;
+    const presignExpiry = PRESIGN_EXPIRY;
     const results = await Promise.all(
       album.photos.map(async (photo) => {
         const thumbKey = photo.thumbS3Key;

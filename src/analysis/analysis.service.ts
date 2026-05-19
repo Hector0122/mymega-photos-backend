@@ -1,67 +1,22 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import sharp from 'sharp';
 import { PrismaService } from '../prisma.service';
-import { S3_CLIENT } from '../common/s3.provider';
+import { S3_CLIENT, getBucketName } from '../common/s3.provider';
+import { computeBlurScore, computePerceptualHash } from '../common/image-analysis';
+import { PRESIGN_EXPIRY } from '../common/constants';
 
 @Injectable()
 export class AnalysisService {
+  private readonly logger = new Logger(AnalysisService.name)
+
   constructor(
     private prisma: PrismaService,
     @Inject(S3_CLIENT) private s3: S3Client,
   ) {}
 
-  private getBucket(): string {
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
-    return bucket;
-  }
-
-  async computeBlurScore(
-    buffer: Buffer,
-  ): Promise<{ blurred: boolean; score: number }> {
-    const { data, info } = await sharp(buffer)
-      .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    let sum = 0;
-    let count = 0;
-    for (let y = 0; y < info.height; y++) {
-      for (let x = 0; x < info.width; x++) {
-        const idx = y * info.width + x;
-        let dx = 0,
-          dy = 0;
-        if (x > 0) dx = Math.abs(data[idx] - data[idx - 1]);
-        if (y > 0) dy = Math.abs(data[idx] - data[idx - info.width]);
-        sum += dx + dy;
-        count++;
-      }
-    }
-    const score = sum / count;
-    return { blurred: score < 10, score: Math.round(score * 100) / 100 };
-  }
-
-  async computePerceptualHash(buffer: Buffer): Promise<string> {
-    const { data, info } = await sharp(buffer)
-      .resize(8, 8, { fit: 'cover' })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const avg = data.reduce((a, b) => a + b, 0) / data.length;
-    const hash = Array.from(data)
-      .map((v) => (v > avg ? '1' : '0'))
-      .join('');
-    return BigInt('0b' + hash)
-      .toString(16)
-      .padStart(16, '0');
-  }
-
   async analyzePhoto(userId: string, photoId: string) {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const photo = await this.prisma.photo.findFirst({
       where: { id: photoId, userId },
@@ -76,8 +31,8 @@ export class AnalysisService {
 
     const buf = Buffer.from(buffer);
     const [blurResult, pHash] = await Promise.all([
-      this.computeBlurScore(buf),
-      this.computePerceptualHash(buf),
+      computeBlurScore(buf),
+      computePerceptualHash(buf),
     ]);
 
     await this.prisma.photo.update({
@@ -107,14 +62,14 @@ export class AnalysisService {
         await this.analyzePhoto(userId, photo.id);
         analyzed++;
       } catch {
-        /* skip failed */
+        this.logger.warn(`Skipping analysis for photo ${photo.id}`)
       }
     }
     return { analyzed };
   }
 
   async getDuplicates(userId: string) {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const photos = await this.prisma.photo.findMany({
       where: {
@@ -144,7 +99,7 @@ export class AnalysisService {
             Bucket: bucket,
             Key: p.thumbS3Key || p.s3Key,
           }),
-          { expiresIn: 604800 },
+          { expiresIn: PRESIGN_EXPIRY },
         );
         return {
           id: p.id,

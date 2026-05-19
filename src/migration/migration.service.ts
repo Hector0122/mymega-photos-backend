@@ -10,7 +10,8 @@ import {
 } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma.service';
-import { S3_CLIENT, publicObjectUrl } from '../common/s3.provider';
+import { S3_CLIENT, publicObjectUrl, getBucketName } from '../common/s3.provider';
+import { THUMB_RESIZE, THUMB_QUALITY } from '../common/constants';
 
 @Injectable()
 export class MigrationService {
@@ -19,18 +20,12 @@ export class MigrationService {
     @Inject(S3_CLIENT) private s3: S3Client,
   ) {}
 
-  private getBucket(): string {
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
-    return bucket;
-  }
-
   private baseName(key: string): string {
     return key.replace('uploads/', '').replace('thumbnails/', '');
   }
 
   async syncS3ToDb(): Promise<{ synced: number }> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const demoUser = await this.prisma.user.findUnique({
       where: { email: 'demo@vaulta.app' },
@@ -97,7 +92,7 @@ export class MigrationService {
   }
 
   async generateMissingThumbnails(): Promise<{ generated: number }> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const command = new ListObjectsV2Command({ Bucket: bucket });
     const response = await this.s3.send(command);
@@ -124,8 +119,8 @@ export class MigrationService {
         );
         const buffer = await obj.Body!.transformToByteArray();
         const thumbBuffer = await sharp(Buffer.from(buffer))
-          .resize(300)
-          .jpeg({ quality: 70 })
+          .resize(THUMB_RESIZE)
+          .jpeg({ quality: THUMB_QUALITY })
           .toBuffer();
         await this.s3.send(
           new PutObjectCommand({
@@ -142,7 +137,7 @@ export class MigrationService {
   }
 
   async migrateToFolders(): Promise<{ moved: number }> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const command = new ListObjectsV2Command({ Bucket: bucket });
     const response = await this.s3.send(command);
@@ -199,7 +194,7 @@ export class MigrationService {
   }
 
   async fixVideoThumbnails(): Promise<{ checked: number; fixed: number }> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
     const videos = await this.prisma.photo.findMany({
       where: { mimeType: { startsWith: 'video/' }, thumbS3Key: { not: null } },
       select: { id: true, thumbS3Key: true, s3Key: true },

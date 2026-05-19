@@ -8,18 +8,16 @@ import {
 import {
   S3Client,
   GetObjectCommand,
-  PutObjectCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import sharp from 'sharp';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import { Worker } from 'worker_threads';
 import { PrismaService } from '../prisma.service';
-import { S3_CLIENT, publicObjectUrl } from '../common/s3.provider';
+import { S3_CLIENT, getBucketName } from '../common/s3.provider';
 import { FirebaseService } from '../firebase/firebase.service';
-import * as exifr from 'exifr';
+import { PRESIGN_EXPIRY, THUMB_RESIZE, THUMB_QUALITY } from '../common/constants';
 
 @Injectable()
 export class PhotosService {
@@ -53,12 +51,21 @@ export class PhotosService {
     );
   }
 
+  private async findOwnedPhoto(photoId: string, userId: string) {
+    const photo = await this.prisma.photo.findUnique({
+      where: { id: photoId },
+    });
+    if (!photo || photo.userId !== userId || photo.deletedAt)
+      throw new NotFoundException();
+    return photo;
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   async startBatchUpload(
     userId: string,
     files: Express.Multer.File[],
   ): Promise<string> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
     const region = process.env.AWS_REGION || 'us-east-1';
     const batchId = crypto.randomUUID();
 
@@ -142,12 +149,6 @@ export class PhotosService {
     return batchId;
   }
 
-  private getBucket(): string {
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
-    if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
-    return bucket;
-  }
-
   async getPhotos(
     userId: string,
     cursor?: string,
@@ -159,7 +160,7 @@ export class PhotosService {
     dateFrom?: string,
     dateTo?: string,
   ) {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const dbPhotos = await this.prisma.photo.findMany({
       where: {
@@ -190,7 +191,7 @@ export class PhotosService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const presignExpiry = 604800;
+    const presignExpiry = PRESIGN_EXPIRY;
 
     const results = await Promise.all(
       dbPhotos.map(async (photo) => {
@@ -221,92 +222,20 @@ export class PhotosService {
     return { photos: results, nextToken };
   }
 
-  async uploadPhoto(
-    userId: string,
-    buffer: Buffer,
-    filename: string,
-  ): Promise<string> {
-    const bucket = this.getBucket();
-
-    const exifData = await exifr.parse(buffer, ['DateTimeOriginal']).catch(() => null)
-    const FALLBACK = new Date('1999-01-01')
-    let photoDate = exifData?.DateTimeOriginal || FALLBACK
-    const y = photoDate.getFullYear()
-    if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = FALLBACK
-    const timestamp = photoDate.getTime()
-    const fullKey = `uploads/${userId}/${timestamp}-${filename}`;
-
-    await this.s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: fullKey,
-        Body: buffer,
-        ContentType: 'image/jpeg',
-      }),
-    );
-
-    const thumbKey = `thumbnails/${userId}/${timestamp}-${filename}`;
-    const thumbBuffer = await sharp(buffer)
-      .resize(300)
-      .jpeg({ quality: 70 })
-      .toBuffer();
-    await this.s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: thumbKey,
-        Body: thumbBuffer,
-        ContentType: 'image/jpeg',
-      }),
-    );
-
-    const url = publicObjectUrl(bucket, fullKey);
-
-    const [blurResult, pHash] = await Promise.all([
-      this.computeBlurScore(buffer),
-      this.computePerceptualHash(buffer),
-    ]);
-
-    await this.prisma.photo.create({
-      data: {
-        s3Key: fullKey,
-        thumbS3Key: thumbKey,
-        url,
-        filename,
-        mimeType: 'image/jpeg',
-        size: buffer.length,
-        blurred: blurResult.blurred,
-        blurScore: blurResult.score,
-        perceptualHash: pHash,
-        createdAt: photoDate,
-        userId,
-      },
-    });
-
-    return url;
-  }
-
   async getPhotoUrl(userId: string, photoId: string): Promise<string> {
-    const bucket = this.getBucket();
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const bucket = getBucketName();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     return getSignedUrl(
       this.s3,
       new GetObjectCommand({ Bucket: bucket, Key: photo.s3Key }),
-      { expiresIn: 604800 },
+      { expiresIn: PRESIGN_EXPIRY },
     );
   }
 
   async getPhotoStream(userId: string, photoId: string) {
-    const bucket = this.getBucket();
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const bucket = getBucketName();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     const command = new GetObjectCommand({ Bucket: bucket, Key: photo.s3Key });
     const response = await this.s3.send(command);
@@ -320,14 +249,10 @@ export class PhotosService {
   async getShareLink(
     userId: string,
     photoId: string,
-    expiresIn: number = 604800,
+    expiresIn: number = PRESIGN_EXPIRY,
   ): Promise<string> {
-    const bucket = this.getBucket();
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const bucket = getBucketName();
+    const photo = await this.findOwnedPhoto(photoId, userId);
     if (photo.private)
       throw new BadRequestException('No se puede compartir una foto privada');
 
@@ -339,11 +264,7 @@ export class PhotosService {
   }
 
   async toggleFavorite(userId: string, photoId: string): Promise<boolean> {
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     const updated = await this.prisma.photo.update({
       where: { id: photoId },
@@ -357,11 +278,7 @@ export class PhotosService {
     photoId: string,
     tag: string,
   ): Promise<string[]> {
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     const normalized = tag.trim().toLowerCase();
     if (!normalized) return photo.tags;
@@ -379,11 +296,7 @@ export class PhotosService {
     photoId: string,
     tag: string,
   ): Promise<string[]> {
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     const updated = await this.prisma.photo.update({
       where: { id: photoId },
@@ -394,7 +307,7 @@ export class PhotosService {
     return updated.tags;
   }
   async getThisDayPhotos(userId: string) {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const today = new Date();
     const month = today.getMonth();
@@ -437,7 +350,7 @@ export class PhotosService {
           const uri = await getSignedUrl(
             this.s3,
             new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
-            { expiresIn: 604800 },
+            { expiresIn: PRESIGN_EXPIRY },
           );
           return {
             year,
@@ -476,11 +389,7 @@ export class PhotosService {
   }
 
   async togglePrivate(userId: string, photoId: string): Promise<boolean> {
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     const newPrivate = !photo.private;
 
@@ -530,11 +439,7 @@ export class PhotosService {
     userId: string,
     photoId: string,
   ): Promise<{ id: string; name: string; vault: boolean }[]> {
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    await this.findOwnedPhoto(photoId, userId);
 
     return this.prisma.album.findMany({
       where: { userId, photos: { some: { id: photoId } } },
@@ -543,11 +448,7 @@ export class PhotosService {
   }
 
   async softDeletePhoto(userId: string, photoId: string): Promise<void> {
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
-    });
-    if (!photo || photo.userId !== userId || photo.deletedAt)
-      throw new NotFoundException();
+    const photo = await this.findOwnedPhoto(photoId, userId);
 
     await this.prisma.photo.update({
       where: { id: photoId },
@@ -580,7 +481,7 @@ export class PhotosService {
   }
 
   async getTrash(userId: string) {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const photos = await this.prisma.photo.findMany({
       where: { userId, deletedAt: { not: null } },
@@ -596,7 +497,7 @@ export class PhotosService {
             Bucket: bucket,
             Key: thumbKey || photo.s3Key,
           }),
-          { expiresIn: 604800 },
+          { expiresIn: PRESIGN_EXPIRY },
         );
         return {
           id: photo.id,
@@ -610,7 +511,7 @@ export class PhotosService {
   }
 
   async permanentlyDeletePhoto(userId: string, photoId: string): Promise<void> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
@@ -631,7 +532,7 @@ export class PhotosService {
   }
 
   async nukeAllPhotos(userId: string): Promise<{ deleted: number }> {
-    const bucket = this.getBucket();
+    const bucket = getBucketName();
 
     const all = await this.prisma.photo.findMany({
       where: { userId },
@@ -657,7 +558,7 @@ export class PhotosService {
     return { deleted: all.length };
   }
 
-  async emptyTrash(userId: string): Promise<{ deleted: number }> {    const bucket = this.getBucket();
+  async emptyTrash(userId: string): Promise<{ deleted: number }> {    const bucket = getBucketName();
 
     const trash = await this.prisma.photo.findMany({
       where: { userId, deletedAt: { not: null } },
@@ -683,47 +584,5 @@ export class PhotosService {
     });
 
     return { deleted: trash.length };
-  }
-
-  private async computeBlurScore(
-    buffer: Buffer,
-  ): Promise<{ blurred: boolean; score: number }> {
-    const { data, info } = await sharp(buffer)
-      .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    let sum = 0;
-    let count = 0;
-    for (let y = 0; y < info.height; y++) {
-      for (let x = 0; x < info.width; x++) {
-        const idx = y * info.width + x;
-        let dx = 0,
-          dy = 0;
-        if (x > 0) dx = Math.abs(data[idx] - data[idx - 1]);
-        if (y > 0) dy = Math.abs(data[idx] - data[idx - info.width]);
-        sum += dx + dy;
-        count++;
-      }
-    }
-    const score = sum / count;
-    return { blurred: score < 10, score: Math.round(score * 100) / 100 };
-  }
-
-  private async computePerceptualHash(buffer: Buffer): Promise<string> {
-    const { data, info } = await sharp(buffer)
-      .resize(8, 8, { fit: 'cover' })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const avg = data.reduce((a, b) => a + b, 0) / data.length;
-    const hash = Array.from(data)
-      .map((v) => (v > avg ? '1' : '0'))
-      .join('');
-    return BigInt('0b' + hash)
-      .toString(16)
-      .padStart(16, '0');
   }
 }

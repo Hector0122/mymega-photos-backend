@@ -31,24 +31,37 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import * as jwt from 'jsonwebtoken';
 import { PhotosService } from './photos.service';
 import { AnalysisService } from '../analysis/analysis.service';
+import { PRESIGN_EXPIRY, ALLOWED_MIMES, MAX_FILE_SIZE, BATCH_MAX_FILES } from '../common/constants';
 import { sanitize } from '../common/sanitize';
-
-const ALLOWED_MIMES = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-  'video/mp4',
-  'video/quicktime',
-  'video/x-msvideo',
-  'video/x-matroska',
-  'video/webm',
-];
 
 const uploadTmpDir = path.join(os.tmpdir(), 'vaulta-uploads');
 if (!fs.existsSync(uploadTmpDir))
   fs.mkdirSync(uploadTmpDir, { recursive: true });
+
+function uploadOptions() {
+  return {
+    storage: diskStorage({
+      destination: uploadTmpDir,
+      filename: (_req: any, file: Express.Multer.File, cb: (err: Error | null, name: string) => void) => {
+        const uniqueName = `${Date.now()}-${crypto.randomUUID()}${path.extname(file.originalname)}`;
+        cb(null, uniqueName);
+      },
+    }),
+    limits: { fileSize: MAX_FILE_SIZE },
+    fileFilter: (_req: any, file: Express.Multer.File, cb: (err: Error | null, accept: boolean) => void) => {
+      if (ALLOWED_MIMES.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(
+          new UnprocessableEntityException(
+            `Formato no soportado: ${file.mimetype}`,
+          ),
+          false,
+        );
+      }
+    },
+  };
+}
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -86,28 +99,7 @@ export class PhotosController {
   @Post('photos/upload')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: uploadTmpDir,
-        filename: (_req, file, cb) => {
-          const uniqueName = `${Date.now()}-${crypto.randomUUID()}${path.extname(file.originalname)}`;
-          cb(null, uniqueName);
-        },
-      }),
-      limits: { fileSize: 500 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (ALLOWED_MIMES.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(
-            new UnprocessableEntityException(
-              `Formato no soportado: ${file.mimetype}`,
-            ),
-            false,
-          );
-        }
-      },
-    }),
+    FileInterceptor('file', uploadOptions()),
   )
   async uploadFile(
     @CurrentUser() user: { id: string },
@@ -121,28 +113,7 @@ export class PhotosController {
   @Post('photos/upload-batch')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
-    FilesInterceptor('files', 50, {
-      storage: diskStorage({
-        destination: uploadTmpDir,
-        filename: (_req, file, cb) => {
-          const uniqueName = `${Date.now()}-${crypto.randomUUID()}${path.extname(file.originalname)}`;
-          cb(null, uniqueName);
-        },
-      }),
-      limits: { fileSize: 500 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (ALLOWED_MIMES.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(
-            new UnprocessableEntityException(
-              `Formato no soportado: ${file.mimetype}`,
-            ),
-            false,
-          );
-        }
-      },
-    }),
+    FilesInterceptor('files', BATCH_MAX_FILES, uploadOptions()),
   )
   async uploadBatch(
     @CurrentUser() user: { id: string },
@@ -189,14 +160,22 @@ export class PhotosController {
 
     const authHeader = req.headers?.authorization;
     if (authHeader) {
-      const payload = jwt.verify(
-        authHeader.replace('Bearer ', ''),
-        secret,
-      ) as any;
-      userId = payload.sub || payload.id;
+      try {
+        const payload = jwt.verify(
+          authHeader.replace('Bearer ', ''),
+          secret,
+        ) as any;
+        userId = payload.sub || payload.id;
+      } catch {
+        throw new UnauthorizedException('Token inválido o expirado');
+      }
     } else if (token) {
-      const payload = jwt.verify(token, secret) as any;
-      userId = payload.sub || payload.id;
+      try {
+        const payload = jwt.verify(token, secret) as any;
+        userId = payload.sub || payload.id;
+      } catch {
+        throw new UnauthorizedException('Token inválido o expirado');
+      }
     } else {
       throw new UnauthorizedException();
     }
@@ -226,7 +205,7 @@ export class PhotosController {
     const url = await this.photosService.getShareLink(
       user.id,
       id,
-      expiresIn ? parseInt(expiresIn, 10) : 604800,
+      expiresIn ? parseInt(expiresIn, 10) : PRESIGN_EXPIRY,
     );
     return { url };
   }

@@ -72,7 +72,7 @@ async function run(input: ExportWorkerInput) {
         archive.append(response.Body as any, { name: photos[i].filename });
       }
     } catch {
-      /* ignore */
+      console.error(`[ExportWorker] Failed to download ${photos[i].filename}`)
     }
     sendProgress(i + 1, photos.length, `Foto ${i + 1} de ${photos.length}`);
   }

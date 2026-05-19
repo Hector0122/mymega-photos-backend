@@ -152,9 +152,8 @@
 ## 📋 Pendientes / Futuras
 
 | # | Feature | Descripción | Requisitos |
-|---|---------|-------------|------------|
-| 1 | **AI auto-álbumes** — Script local que organiza fotos por contexto | Usa CLIP + clustering para agrupar fotos visualmente similares y Ollama para nombrar los grupos. Corre en tu laptop. Crea álbumes via API del backend | Ver `AI_PLAN.md` para plan detallado |
-| 2 | **Subida masiva desde disco externo** — Script que copia 100GB de fotos a R2 sin pasar por el celular | Script Node.js que lee fotos del disco duro y las sube al backend. Detección de duplicados, barra de progreso | Plan detallado en `AI_PLAN.md` |
+|---|---|---|---|
+| 1 | **Subida masiva desde disco externo** — Script que copia 100GB de fotos a R2 sin pasar por el celular | Script Node.js que lee fotos del disco duro y las sube al backend. Detección de duplicados, barra de progreso | Plan detallado en `AI_PLAN.md` |
 | 3 | **Upload en segundo plano** — Las subidas continúan aunque cierres la app | Notificación de progreso nativa. WorkManager (Android), NSURLSession (iOS) | Investigar compatibilidad con RN 0.83.1 |
 | 4 | **Sincronización automática con galería** — Escanea DCIM/Camera y sube nuevas fotos | Filtra screenshots/WhatsApp, compara con ya subidas, sube en lote con progreso | Escaneo periódico opcional |
 | 5 | **Búsqueda avanzada** — Por tags, rango de fechas, ubicación, blurry | Mejorar search bar actual con filtros combinados | Backend ya soporta tags, falta UI |

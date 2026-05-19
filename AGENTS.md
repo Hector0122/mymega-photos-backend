@@ -162,13 +162,9 @@ adb reverse tcp:3000 tcp:3000
 - SkipAuth decorator for public stream endpoint
 - Global exception filter
 
-## AI Plan (future)
+## Scripts (local laptop)
 
-See `AI_PLAN.md` in root for:
-1. **Bulk upload script** — import 100GB from external drive directly to R2
-2. **AI auto-albums** — local Python sidecar using CLIP + clustering + Ollama to organize photos
-
-Both run on developer's laptop, $0 extra infrastructure cost.
+- **Bulk upload** — `scripts/bulk-upload.ts`, import 100GB from external drive directly to R2. See `AI_PLAN.md`.
 
 ## Coding conventions
 
