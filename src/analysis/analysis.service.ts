@@ -60,11 +60,11 @@ export class AnalysisService {
       .padStart(16, '0');
   }
 
-  async analyzePhoto(photoId: string) {
+  async analyzePhoto(userId: string, photoId: string) {
     const bucket = this.getBucket();
 
-    const photo = await this.prisma.photo.findUnique({
-      where: { id: photoId },
+    const photo = await this.prisma.photo.findFirst({
+      where: { id: photoId, userId },
     });
     if (!photo) throw new NotFoundException();
 
@@ -104,7 +104,7 @@ export class AnalysisService {
     let analyzed = 0;
     for (const photo of photos) {
       try {
-        await this.analyzePhoto(photo.id);
+        await this.analyzePhoto(userId, photo.id);
         analyzed++;
       } catch {
         /* skip failed */

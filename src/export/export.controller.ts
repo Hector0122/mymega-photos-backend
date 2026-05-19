@@ -19,8 +19,11 @@ export class ExportController {
   constructor(private readonly exportService: ExportService) {}
 
   @Get('exports/:id')
-  getExportStatus(@Param('id') id: string) {
-    return this.exportService.getExportStatus(id);
+  getExportStatus(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.exportService.getExportStatus(id, user.id);
   }
 
   @Post('photos/export')

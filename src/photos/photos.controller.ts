@@ -31,6 +31,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import * as jwt from 'jsonwebtoken';
 import { PhotosService } from './photos.service';
 import { AnalysisService } from '../analysis/analysis.service';
+import { sanitize } from '../common/sanitize';
 
 const ALLOWED_MIMES = [
   'image/jpeg',
@@ -73,7 +74,7 @@ export class PhotosController {
       user.id,
       pageToken,
       maxKeys ? parseInt(maxKeys, 10) : 50,
-      query,
+      query ? sanitize(query, 100) : undefined,
       favorites === 'true',
       blurry === 'true',
       privateOnly === 'true',
@@ -183,18 +184,18 @@ export class PhotosController {
     @Query('token') token?: string,
   ) {
     let userId: string;
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new UnauthorizedException('JWT_SECRET not configured');
+
     const authHeader = req.headers?.authorization;
     if (authHeader) {
       const payload = jwt.verify(
         authHeader.replace('Bearer ', ''),
-        process.env.JWT_SECRET || 'mymega-secret-key',
+        secret,
       ) as any;
       userId = payload.sub || payload.id;
     } else if (token) {
-      const payload = jwt.verify(
-        token,
-        process.env.JWT_SECRET || 'mymega-secret-key',
-      ) as any;
+      const payload = jwt.verify(token, secret) as any;
       userId = payload.sub || payload.id;
     } else {
       throw new UnauthorizedException();
@@ -259,7 +260,10 @@ export class PhotosController {
   ) {
     if (!tag || typeof tag !== 'string')
       throw new BadRequestException('tag is required');
-    const tags = await this.photosService.addTag(user.id, id, tag);
+    const sanitized = sanitize(tag, 50);
+    if (!sanitized)
+      throw new BadRequestException('tag is empty after sanitization');
+    const tags = await this.photosService.addTag(user.id, id, sanitized);
     return { tags };
   }
 
@@ -272,7 +276,10 @@ export class PhotosController {
   ) {
     if (!tag || typeof tag !== 'string')
       throw new BadRequestException('tag is required');
-    const tags = await this.photosService.removeTag(user.id, id, tag);
+    const sanitized = sanitize(tag, 50);
+    if (!sanitized)
+      throw new BadRequestException('tag is empty after sanitization');
+    const tags = await this.photosService.removeTag(user.id, id, sanitized);
     return { tags };
   }
 
@@ -282,6 +289,44 @@ export class PhotosController {
     @Param('id') id: string,
   ) {
     return this.photosService.getPhotoAlbums(user.id, id);
+  }
+
+  @Delete('photos/bulk')
+  @HttpCode(HttpStatus.OK)
+  async bulkDeletePhotos(
+    @CurrentUser() user: { id: string },
+    @Body('ids') ids: string[],
+  ) {
+    if (!Array.isArray(ids) || ids.length === 0)
+      throw new BadRequestException('ids must be a non-empty array');
+    return this.photosService.bulkSoftDelete(user.id, ids);
+  }
+
+  @Delete('photos/trash/:id')
+  @HttpCode(HttpStatus.OK)
+  async permanentlyDeletePhoto(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    await this.photosService.permanentlyDeletePhoto(user.id, id);
+    return { deleted: true };
+  }
+
+  @Delete('photos/trash')
+  @HttpCode(HttpStatus.OK)
+  async emptyTrash(@CurrentUser() user: { id: string }) {
+    return this.photosService.emptyTrash(user.id);
+  }
+
+  @Delete('photos/all')
+  @HttpCode(HttpStatus.OK)
+  async nukeAllPhotos(
+    @CurrentUser() user: { id: string },
+    @Body('confirm') confirm: string,
+  ) {
+    if (confirm !== 'DELETE_ALL')
+      throw new BadRequestException('Envía { "confirm": "DELETE_ALL" } para confirmar');
+    return this.photosService.nukeAllPhotos(user.id);
   }
 
   @Delete('photos/:id')
@@ -302,15 +347,5 @@ export class PhotosController {
   ) {
     await this.photosService.restorePhoto(user.id, id);
     return { restored: true };
-  }
-
-  @Delete('photos/trash/:id')
-  @HttpCode(HttpStatus.OK)
-  async permanentlyDeletePhoto(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
-  ) {
-    await this.photosService.permanentlyDeletePhoto(user.id, id);
-    return { deleted: true };
   }
 }

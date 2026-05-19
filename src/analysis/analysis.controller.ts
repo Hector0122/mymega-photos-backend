@@ -25,10 +25,10 @@ export class AnalysisController {
   @Post('photos/:id/analyze')
   @HttpCode(HttpStatus.OK)
   async analyzePhoto(
-    @CurrentUser() _user: { id: string },
+    @CurrentUser() user: { id: string },
     @Param('id') id: string,
   ) {
-    return this.analysisService.analyzePhoto(id);
+    return this.analysisService.analyzePhoto(user.id, id);
   }
 
   @Get('photos/duplicates')

@@ -26,8 +26,10 @@ export class ExportService {
     private firebase: FirebaseService,
   ) {}
 
-  getExportStatus(exportId: string): ExportProgress | { status: 'not_found' } {
-    return this._exports.get(exportId) || { status: 'not_found' };
+  getExportStatus(exportId: string, userId: string): ExportProgress | { status: 'not_found' } {
+    const exp = this._exports.get(exportId);
+    if (!exp || exp.userId !== userId) return { status: 'not_found' };
+    return exp;
   }
 
   async startAllExport(userId: string): Promise<{ exportId: string }> {
@@ -90,6 +92,7 @@ export class ExportService {
       completed: 0,
       message: 'Iniciando exportación…',
       label,
+      userId,
     };
     this._exports.set(exportId, progress);
 

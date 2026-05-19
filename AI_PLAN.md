@@ -41,8 +41,8 @@ Disco externo → script Node.js → Railway (NestJS) → R2 + Supabase
 - Usa autenticación JWT (necesitas un token de tu cuenta)
 - Sube en lotes para no saturar Railway
 - Barra de progreso en terminal
-- Salta duplicados (compara por nombre/tamaño)
-- Reporte final: cuántas subió, cuántas fallaron, cuántos duplicados
+- **Detección de duplicados**: antes de subir, compara perceptual hash de cada foto contra las que ya están en la DB — si existe exactamente igual, la salta
+- Reporte final: cuántas subió, cuántas fallaron, cuántos duplicados saltados
 
 ---
 
@@ -74,19 +74,41 @@ Tu Mac:
 │  2. CLIP (sentence-transformers) genera vector    │
 │     numérico por foto (~50ms c/u)                 │
 │                                                   │
-│  3. K-Means / DBSCAN agrupa vectores similares    │
+│  3. Detecta duplicados exactos (mismo perceptual  │
+│     hash) → los borra automático, conserva 1      │
 │                                                   │
-│  4. Para cada grupo, Ollama recibe 1-2 fotos      │
-│     representativas + prompt → genera nombre:     │
-│     "Visita a Cancún 2024", "Cena de navidad"     │
+│  4. K-Means / DBSCAN agrupa vectores similares    │
 │                                                   │
-│  5. Crea álbumes en tu cuenta via API del backend │
+│  5. Dentro de cada grupo, detecta casi-duplicados │
+│     (fotos casi iguales) → pregunta:              │
+│     "¿Elimino 14 y dejo la mejor?"                │
 │                                                   │
-│  6. Te muestra resumen en terminal                │
+│  6. Para cada grupo final, Ollama recibe 1-2      │
+│     fotos representativas + prompt → genera       │
+│     nombre: "Visita a Cancún 2024", "Cena..."     │
+│                                                   │
+│  7. Crea álbumes en tu cuenta via API del backend │
+│                                                   │
+│  8. Te muestra resumen completo en terminal       │
 └─────────────────────────────────────────────────┘
        ↓
-  Railway (NestJS) → crea álbumes en Supabase
+  Railway (NestJS) → borra duplicados + crea álbumes en Supabase
 ```
+
+### Limpieza de duplicados
+
+El script ataca duplicados en **2 niveles**:
+
+| Nivel                  | Criterio                                                                | Acción                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Duplicados exactos** | Mismo `perceptualHash` (64-bit)                                         | Se eliminan automáticamente, se conserva 1 copia (la de mejor resolución)              |
+| **Casi duplicados**    | CLIP las agrupa juntas + distancia euclidiana muy baja entre embeddings | El script te pregunta: _"Estas N fotos son casi iguales, ¿borro N-1 y dejo la mejor?"_ |
+
+El backend ya soporta esto:
+
+- `perceptualHash` se calcula automáticamente al subir cada foto (`upload.worker.ts`)
+- `GET /photos/duplicates` agrupa por hash
+- `DELETE /photos/trash/:id` y `POST /photos/:id/restore` ya existen
 
 ### ¿Qué necesitas instalar?
 
@@ -101,13 +123,13 @@ ollama pull gemma3:2b                        # Modelo chico para nombres
 
 Para 100GB de fotos (~25,000-40,000 fotos):
 
-| Paso | Tiempo estimado |
-|---|---|
-| Descargar miniaturas de R2 | 2-5 minutos |
-| Generar embeddings (CLIP) | 20-40 minutos |
-| Clustering | 10-30 segundos |
-| Ollama nombrando (~10-20 grupos) | 1-2 minutos |
-| **Total** | **~25-50 minutos** |
+| Paso                             | Tiempo estimado    |
+| -------------------------------- | ------------------ |
+| Descargar miniaturas de R2       | 2-5 minutos        |
+| Generar embeddings (CLIP)        | 20-40 minutos      |
+| Clustering                       | 10-30 segundos     |
+| Ollama nombrando (~10-20 grupos) | 1-2 minutos        |
+| **Total**                        | **~25-50 minutos** |
 
 ### Privacidad
 
@@ -142,13 +164,13 @@ de la laptop:
 
 ## Costos
 
-| Componente | Hoy | Con Fase 1+2 | Con VPS (Fase 3) |
-|---|---|---|---|
-| Railway | $0-5/mes | $0-5/mes | $0-5/mes |
-| Supabase | $0 | $0 | $0 |
-| R2 (100GB) | ~$1.35/mes | ~$1.35/mes | ~$1.35/mes |
-| VPS Hetzner | — | — | $4.35/mes |
-| **Total** | **~$1-6/mes** | **~$1-6/mes** | **~$5-10/mes** |
+| Componente  | Hoy           | Con Fase 1+2  | Con VPS (Fase 3) |
+| ----------- | ------------- | ------------- | ---------------- |
+| Railway     | $0-5/mes      | $0-5/mes      | $0-5/mes         |
+| Supabase    | $0            | $0            | $0               |
+| R2 (100GB)  | ~$1.35/mes    | ~$1.35/mes    | ~$1.35/mes       |
+| VPS Hetzner | —             | —             | $4.35/mes        |
+| **Total**   | **~$1-6/mes** | **~$1-6/mes** | **~$5-10/mes**   |
 
 Los scripts Fase 1 y 2 corren en tu laptop existente — **$0 extra**.
 
@@ -157,14 +179,17 @@ Los scripts Fase 1 y 2 corren en tu laptop existente — **$0 extra**.
 ## Resumen de comandos
 
 ```bash
-# Subir fotos del disco duro a la nube
+# Subir fotos del disco duro a la nube (salta duplicados automático)
 npm run subir-masivo -- /ruta/al/disco
 
-# Organizar fotos con AI (crear álbumes automáticos)
+# Organizar fotos con AI + limpiar duplicados + crear álbumes
 npm run organizar
 
-# Ver resultados
-npm run organizar -- --preview   # Solo muestra grupos, no crea álbumes
+# Solo previsualizar (no borra nada, no crea nada)
+npm run organizar -- --preview
+
+# Solo limpiar duplicados (sin organizar álbumes)
+npm run organizar -- --clean-only
 ```
 
 ---
@@ -183,3 +208,8 @@ npm run organizar -- --preview   # Solo muestra grupos, no crea álbumes
 
 El script se conecta directamente a tu Supabase para leer metadatos de fotos
 (userId, s3Keys, etc.) usando la misma `DATABASE_URL` que tu backend.
+
+
+
+#### Delete all data base
+TOKEN=$(curl -s -X POST http://localhost:3000/auth/login -H "Content-Type: application/json" -d '{"email":"hpave954@gmail.com","password":"12345678"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])") && curl -s -X DELETE http://localhost:3000/photos/all -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"confirm":"DELETE_ALL"}'

@@ -4,4 +4,5 @@ export interface ExportProgress {
   completed: number;
   message: string;
   label: string;
+  userId: string;
 }

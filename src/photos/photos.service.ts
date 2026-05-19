@@ -447,7 +447,7 @@ export class PhotosService {
   }
 
   async getStats(userId: string) {
-    const [photoCount, albumCount, favoriteCount, blurryCount] =
+    const [photoCount, albumCount, favoriteCount, blurryCount, storageResult] =
       await Promise.all([
         this.prisma.photo.count({
           where: { userId, deletedAt: null, private: false },
@@ -459,8 +459,13 @@ export class PhotosService {
         this.prisma.photo.count({
           where: { userId, deletedAt: null, private: false, blurred: true },
         }),
+        this.prisma.photo.aggregate({
+          where: { userId, deletedAt: null },
+          _sum: { size: true },
+        }),
       ]);
-    return { photoCount, albumCount, favoriteCount, blurryCount };
+    const totalSize = storageResult._sum.size ?? 0;
+    return { photoCount, albumCount, favoriteCount, blurryCount, totalSize };
   }
 
   async togglePrivate(userId: string, photoId: string): Promise<boolean> {
@@ -543,6 +548,17 @@ export class PhotosService {
     });
   }
 
+  async bulkSoftDelete(
+    userId: string,
+    ids: string[],
+  ): Promise<{ deleted: number }> {
+    const result = await this.prisma.photo.updateMany({
+      where: { id: { in: ids }, userId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    return { deleted: result.count };
+  }
+
   async restorePhoto(userId: string, photoId: string): Promise<void> {
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
@@ -605,6 +621,61 @@ export class PhotosService {
     );
 
     await this.prisma.photo.delete({ where: { id: photoId } });
+  }
+
+  async nukeAllPhotos(userId: string): Promise<{ deleted: number }> {
+    const bucket = this.getBucket();
+
+    const all = await this.prisma.photo.findMany({
+      where: { userId },
+      select: { id: true, s3Key: true, thumbS3Key: true },
+    });
+
+    if (all.length === 0) return { deleted: 0 };
+
+    const s3Keys = all.flatMap((p) => {
+      const keys = [p.s3Key];
+      if (p.thumbS3Key) keys.push(p.thumbS3Key);
+      return keys;
+    });
+
+    await Promise.allSettled(
+      s3Keys.map((key) =>
+        this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+      ),
+    );
+
+    await this.prisma.photo.deleteMany({ where: { userId } });
+
+    return { deleted: all.length };
+  }
+
+  async emptyTrash(userId: string): Promise<{ deleted: number }> {    const bucket = this.getBucket();
+
+    const trash = await this.prisma.photo.findMany({
+      where: { userId, deletedAt: { not: null } },
+      select: { id: true, s3Key: true, thumbS3Key: true },
+    });
+
+    if (trash.length === 0) return { deleted: 0 };
+
+    const s3Keys = trash.flatMap((p) => {
+      const keys = [p.s3Key];
+      if (p.thumbS3Key) keys.push(p.thumbS3Key);
+      return keys;
+    });
+
+    await Promise.allSettled(
+      s3Keys.map((key) =>
+        this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+      ),
+    );
+
+    await this.prisma.photo.deleteMany({
+      where: { id: { in: trash.map((p) => p.id) } },
+    });
+
+    return { deleted: trash.length };
   }
 
   private async computeBlurScore(

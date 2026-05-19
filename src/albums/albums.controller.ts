@@ -10,9 +10,11 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AlbumsService } from './albums.service';
+import { sanitize } from '../common/sanitize';
 
 @UseGuards(JwtAuthGuard)
 @Controller('albums')
@@ -34,7 +36,9 @@ export class AlbumsController {
     @CurrentUser() user: { id: string },
     @Body() body: { name: string },
   ) {
-    return this.albums.create(user.id, body.name);
+    const name = sanitize(body.name, 100);
+    if (!name) throw new BadRequestException('Invalid album name');
+    return this.albums.create(user.id, name);
   }
 
   @Patch(':id')
@@ -44,7 +48,16 @@ export class AlbumsController {
     @Param('id') id: string,
     @Body() body: { name?: string; coverPhotoId?: string | null },
   ) {
-    return this.albums.update(user.id, id, body);
+    const sanitized: any = {};
+    if (body.name !== undefined) {
+      const name = sanitize(body.name, 100);
+      if (!name) throw new BadRequestException('Invalid album name');
+      sanitized.name = name;
+    }
+    if (body.coverPhotoId !== undefined) {
+      sanitized.coverPhotoId = body.coverPhotoId;
+    }
+    return this.albums.update(user.id, id, sanitized);
   }
 
   @Delete(':id')
