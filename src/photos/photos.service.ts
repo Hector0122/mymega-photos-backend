@@ -19,6 +19,7 @@ import { Worker } from 'worker_threads';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT, publicObjectUrl } from '../common/s3.provider';
 import { FirebaseService } from '../firebase/firebase.service';
+import * as exifr from 'exifr';
 
 @Injectable()
 export class PhotosService {
@@ -227,7 +228,12 @@ export class PhotosService {
   ): Promise<string> {
     const bucket = this.getBucket();
 
-    const timestamp = Date.now();
+    const exifData = await exifr.parse(buffer, ['DateTimeOriginal']).catch(() => null)
+    const FALLBACK = new Date('1999-01-01')
+    let photoDate = exifData?.DateTimeOriginal || FALLBACK
+    const y = photoDate.getFullYear()
+    if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = FALLBACK
+    const timestamp = photoDate.getTime()
     const fullKey = `uploads/${userId}/${timestamp}-${filename}`;
 
     await this.s3.send(
@@ -271,6 +277,7 @@ export class PhotosService {
         blurred: blurResult.blurred,
         blurScore: blurResult.score,
         perceptualHash: pHash,
+        createdAt: photoDate,
         userId,
       },
     });

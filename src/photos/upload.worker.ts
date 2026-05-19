@@ -5,6 +5,7 @@ import * as path from 'path';
 import { createRequire } from 'module';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import * as exifr from 'exifr';
 const req = createRequire(__filename);
 
 interface UploadWorkerInput {
@@ -60,7 +61,12 @@ async function run(input: UploadWorkerInput) {
   for (const file of files) {
     try {
       const buffer = fs.readFileSync(file.path);
-      const timestamp = Date.now();
+      const exifData = await exifr.parse(buffer, ['DateTimeOriginal']).catch(() => null)
+      const FALLBACK = new Date('1999-01-01')
+      let photoDate = exifData?.DateTimeOriginal || FALLBACK
+      const y = photoDate.getFullYear()
+      if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = FALLBACK
+      const timestamp = photoDate.getTime()
       const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
       const isVideo = file.mimeType.startsWith('video/');
 
@@ -141,6 +147,7 @@ async function run(input: UploadWorkerInput) {
             filename: file.filename,
             mimeType: file.mimeType,
             size: file.size,
+            createdAt: photoDate,
             userId,
           },
         });
@@ -206,6 +213,7 @@ async function run(input: UploadWorkerInput) {
             blurred,
             blurScore: Math.round(blurScore * 100) / 100,
             perceptualHash,
+            createdAt: photoDate,
             userId,
           },
         });
