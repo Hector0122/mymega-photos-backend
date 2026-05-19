@@ -50,10 +50,11 @@ def main():
     print(f"Loading CLIP model...", file=sys.stderr)
     model = SentenceTransformer('clip-ViT-B-32')
 
-    print(f"Generating embeddings for {len(valid)} images...", file=sys.stderr)
+    total_valid = len(valid)
+    print(f"Generating embeddings for {total_valid} images...", file=sys.stderr)
     embeddings = []
     image_files = []
-    for fpath in valid:
+    for idx, fpath in enumerate(valid):
         try:
             img = Image.open(fpath).convert('RGB')
             emb = model.encode(img)
@@ -61,6 +62,9 @@ def main():
             image_files.append(fpath)
         except Exception as e:
             print(f"Warning: {os.path.basename(fpath)}: {e}", file=sys.stderr)
+        if (idx + 1) % 100 == 0 or idx + 1 == total_valid:
+            pct = (idx + 1) / total_valid * 100
+            print(f"  Embeddings: {idx + 1}/{total_valid} ({pct:.0f}%)", file=sys.stderr)
 
     if not image_files:
         print(json.dumps({"version": 1, "total_photos": 0, "total_clusters": 0, "clusters": [], "photos": {}, "representatives": {}}))
