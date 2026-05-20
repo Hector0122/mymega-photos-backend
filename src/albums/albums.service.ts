@@ -22,7 +22,7 @@ export class AlbumsService {
     const albums = await this.prisma.album.findMany({
       where: { userId, vault: false },
       include: { _count: { select: { photos: true } } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     if (!bucket) return albums;
@@ -72,7 +72,7 @@ export class AlbumsService {
       include: {
         photos: {
           where: { deletedAt: null },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         },
       },
     });
@@ -83,7 +83,7 @@ export class AlbumsService {
         include: {
           photos: {
             where: { deletedAt: null },
-            orderBy: { createdAt: 'desc' },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           },
         },
       }));
@@ -109,7 +109,7 @@ export class AlbumsService {
         include: {
           photos: {
             where: { deletedAt: null },
-            orderBy: { createdAt: 'desc' },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           },
         },
       });
@@ -251,7 +251,7 @@ export class AlbumsService {
             deletedAt: null,
             ...(albumMeta.vault ? {} : { private: false }),
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         },
       },
     });

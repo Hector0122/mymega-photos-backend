@@ -71,10 +71,12 @@ async function run(input: UploadWorkerInput) {
     const exifData = await exifr
       .parse(buffer, ['DateTimeOriginal'])
       .catch(() => null);
-    const FALLBACK = new Date('1999-01-01');
-    let photoDate = exifData?.DateTimeOriginal || FALLBACK;
-    const y = photoDate.getFullYear();
-    if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = FALLBACK;
+    let photoDate = exifData?.DateTimeOriginal || null;
+    if (photoDate) {
+      const y = photoDate.getFullYear();
+      if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = null;
+    }
+    if (!photoDate) photoDate = new Date();
     const timestamp = photoDate.getTime();
     const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
     const isVideo = file.mimeType.startsWith('video/');
