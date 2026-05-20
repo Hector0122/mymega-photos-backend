@@ -23,7 +23,16 @@ interface ExportWorkerInput {
 }
 
 async function run(input: ExportWorkerInput) {
-  const { exportId, userId, photos, label, bucket, region, r2AccountId, userEmail } = input;
+  const {
+    exportId,
+    userId,
+    photos,
+    label,
+    bucket,
+    region,
+    r2AccountId,
+    userEmail,
+  } = input;
   const r2Endpoint = r2AccountId
     ? `https://${r2AccountId}.r2.cloudflarestorage.com`
     : undefined;
@@ -32,8 +41,10 @@ async function run(input: ExportWorkerInput) {
     endpoint: r2Endpoint,
     forcePathStyle: !!r2Endpoint,
     credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY!,
+      accessKeyId:
+        process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey:
+        process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY!,
     },
     requestHandler: {
       requestTimeout: 600_000,
@@ -72,7 +83,7 @@ async function run(input: ExportWorkerInput) {
         archive.append(response.Body as any, { name: photos[i].filename });
       }
     } catch {
-      console.error(`[ExportWorker] Failed to download ${photos[i].filename}`)
+      console.error(`[ExportWorker] Failed to download ${photos[i].filename}`);
     }
     sendProgress(i + 1, photos.length, `Foto ${i + 1} de ${photos.length}`);
   }
@@ -123,14 +134,17 @@ async function run(input: ExportWorkerInput) {
           <p>Saludos,<br>El equipo de Vaulta</p>
         `)}`,
       ].join('&');
-      const res = await fetch(`https://api.mailgun.net/v3/${mailgunDomain}/messages`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const res = await fetch(
+        `https://api.mailgun.net/v3/${mailgunDomain}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData,
         },
-        body: formData,
-      });
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Mailgun API ${res.status}: ${text}`);
@@ -141,7 +155,11 @@ async function run(input: ExportWorkerInput) {
         exportId,
         message: (e as Error).message,
       });
-      sendProgress(photos.length, photos.length, `Correo omitido: ${(e as Error).message}`);
+      sendProgress(
+        photos.length,
+        photos.length,
+        `Correo omitido: ${(e as Error).message}`,
+      );
     }
   }
 

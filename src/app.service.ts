@@ -13,8 +13,10 @@ export class AppService implements OnApplicationBootstrap {
       const { synced } = await this.migrationService.syncS3ToDb();
       if (synced > 0)
         this.logger.log(`Synced ${synced} existing S3 photos to demo user`);
-    } catch {
-      // fail silently — e.g. no S3 configured, or no demo user yet
+    } catch (err) {
+      this.logger.debug(
+        `Auto-sync skipped: ${(err as Error).message ?? 'unknown error'}`,
+      );
     }
   }
 }

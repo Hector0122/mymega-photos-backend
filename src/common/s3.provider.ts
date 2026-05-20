@@ -26,7 +26,8 @@ export function createS3Client(): S3Client {
 
 export function getBucketName(): string {
   const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
-  if (!bucket) throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
+  if (!bucket)
+    throw new Error('R2_BUCKET_NAME or AWS_S3_BUCKET env variable is required');
   return bucket;
 }
 

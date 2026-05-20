@@ -38,7 +38,6 @@ See `.env.example` for all required variables: `DATABASE_URL`, `JWT_SECRET`, R2 
 | `GET` | `/photos` | List photos (cursor-based pagination) |
 | `GET` | `/photos/stats` | Photo/album/favorite counts |
 | `GET` | `/photos/trash` | List soft-deleted photos |
-| `GET` | `/photos/geo` | Geotagged photos |
 | `GET` | `/photos/this-day` | Photos from same date in prior years |
 | `GET` | `/photos/duplicates` | Duplicate groups (by perceptual hash) |
 | `GET` | `/photos/:id` | Single photo signed URL |

@@ -10,7 +10,11 @@ import {
 } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma.service';
-import { S3_CLIENT, publicObjectUrl, getBucketName } from '../common/s3.provider';
+import {
+  S3_CLIENT,
+  publicObjectUrl,
+  getBucketName,
+} from '../common/s3.provider';
 import { THUMB_RESIZE, THUMB_QUALITY } from '../common/constants';
 
 @Injectable()

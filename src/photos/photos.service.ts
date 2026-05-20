@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import {
   S3Client,
@@ -17,10 +18,10 @@ import { Worker } from 'worker_threads';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT, getBucketName } from '../common/s3.provider';
 import { FirebaseService } from '../firebase/firebase.service';
-import { PRESIGN_EXPIRY, THUMB_RESIZE, THUMB_QUALITY } from '../common/constants';
+import { PRESIGN_EXPIRY } from '../common/constants';
 
 @Injectable()
-export class PhotosService {
+export class PhotosService implements OnModuleInit {
   private readonly logger = new Logger(PhotosService.name);
   private _batches = new Map<
     string,
@@ -38,6 +39,41 @@ export class PhotosService {
     @Inject(S3_CLIENT) private s3: S3Client,
     private firebase: FirebaseService,
   ) {}
+
+  onModuleInit() {
+    void this.cleanExpiredTrash();
+    setInterval(() => void this.cleanExpiredTrash(), 6 * 60 * 60 * 1000);
+  }
+
+  private async cleanExpiredTrash() {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const expired = await this.prisma.photo.findMany({
+        where: { deletedAt: { lte: thirtyDaysAgo } },
+        select: { id: true, s3Key: true, thumbS3Key: true },
+      });
+      if (expired.length === 0) return;
+      const bucket = getBucketName();
+      const s3Keys = expired.flatMap((p) => {
+        const keys = [p.s3Key];
+        if (p.thumbS3Key) keys.push(p.thumbS3Key);
+        return keys;
+      });
+      await Promise.allSettled(
+        s3Keys.map((key) =>
+          this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+        ),
+      );
+      await this.prisma.photo.deleteMany({
+        where: { id: { in: expired.map((p) => p.id) } },
+      });
+      this.logger.log(
+        `Auto-limpiadas ${expired.length} foto(s) de la papelera (30+ días)`,
+      );
+    } catch (err) {
+      this.logger.error('Error en cleanExpiredTrash', (err as Error).message);
+    }
+  }
 
   getBatchStatus(batchId: string) {
     return (
@@ -86,21 +122,30 @@ export class PhotosService {
 
     const r2AccountId = process.env.R2_ACCOUNT_ID;
     const workerPath = path.join(__dirname, 'upload.worker.js');
-    this.logger.log(`Spawning upload worker: ${workerPath}, files: ${files.length}`);
+    this.logger.log(
+      `Spawning upload worker: ${workerPath}, files: ${files.length}`,
+    );
 
-    let worker: Worker
+    let worker: Worker;
     try {
       worker = new Worker(workerPath, {
-        workerData: { batchId, userId, files: workerFiles, bucket, region, r2AccountId },
-      })
+        workerData: {
+          batchId,
+          userId,
+          files: workerFiles,
+          bucket,
+          region,
+          r2AccountId,
+        },
+      });
     } catch (err) {
-      this.logger.error(`Failed to create worker: ${(err as Error).message}`)
-      const b = this._batches.get(batchId)
+      this.logger.error(`Failed to create worker: ${(err as Error).message}`);
+      const b = this._batches.get(batchId);
       if (b) {
-        b.status = 'error'
-        b.message = `Error al iniciar worker: ${(err as Error).message}`
+        b.status = 'error';
+        b.message = `Error al iniciar worker: ${(err as Error).message}`;
       }
-      return batchId
+      return batchId;
     }
 
     worker.on('message', (msg: any) => {
@@ -108,16 +153,22 @@ export class PhotosService {
       if (!b) return;
 
       if (msg.type === 'progress') {
-        b.status = msg.message.startsWith('Error') ? 'error' : 'processing';
-        b.completed = msg.completed;
-        b.failed = msg.failed;
-        b.message = msg.message;
-        if (msg.message.startsWith('Error')) this.logger.warn(msg.message)
+        this._batches.set(msg.batchId, {
+          ...b,
+          status: msg.message.startsWith('Error') ? 'error' : 'processing',
+          completed: msg.completed,
+          failed: msg.failed,
+          message: msg.message,
+        });
+        if (msg.message.startsWith('Error')) this.logger.warn(msg.message);
       } else if (msg.type === 'done') {
-        b.status = 'done';
-        b.completed = msg.completed;
-        b.failed = msg.failed;
-        b.message = msg.message;
+        this._batches.set(msg.batchId, {
+          ...b,
+          status: 'done',
+          completed: msg.completed,
+          failed: msg.failed,
+          message: msg.message,
+        });
         this.firebase
           .sendToUser(userId, {
             title: 'Subida completada',
@@ -127,18 +178,27 @@ export class PhotosService {
             this.logger.error('Firebase notification error', err),
           );
       } else if (msg.type === 'error') {
-        b.status = 'error';
-        b.message = msg.message;
+        this._batches.set(msg.batchId, {
+          ...b,
+          status: 'error',
+          message: msg.message,
+        });
         this.logger.error(`Upload batch ${batchId} failed: ${msg.message}`);
       }
     });
 
     worker.on('error', (err) => {
-      this.logger.error(`Worker error for batch ${batchId}: ${err.message}`, err.stack);
+      this.logger.error(
+        `Worker error for batch ${batchId}: ${err.message}`,
+        err.stack,
+      );
       const b = this._batches.get(batchId);
       if (b) {
-        b.status = 'error';
-        b.message = err.message;
+        this._batches.set(batchId, {
+          ...b,
+          status: 'error',
+          message: err.message,
+        });
       }
     });
 
@@ -220,6 +280,31 @@ export class PhotosService {
     const nextToken =
       dbPhotos.length === maxKeys ? dbPhotos[dbPhotos.length - 1].id : null;
     return { photos: results, nextToken };
+  }
+
+  async getPhotoDetail(
+    userId: string,
+    photoId: string,
+  ): Promise<{
+    url: string;
+    albums: { id: string; name: string; vault: boolean }[];
+  }> {
+    const bucket = getBucketName();
+    const photo = await this.findOwnedPhoto(photoId, userId);
+
+    const [url, albums] = await Promise.all([
+      getSignedUrl(
+        this.s3,
+        new GetObjectCommand({ Bucket: bucket, Key: photo.s3Key }),
+        { expiresIn: PRESIGN_EXPIRY },
+      ),
+      this.prisma.album.findMany({
+        where: { userId, photos: { some: { id: photoId } } },
+        select: { id: true, name: true, vault: true },
+      }),
+    ]);
+
+    return { url, albums };
   }
 
   async getPhotoUrl(userId: string, photoId: string): Promise<string> {
@@ -310,31 +395,31 @@ export class PhotosService {
     const bucket = getBucketName();
 
     const today = new Date();
-    const month = today.getMonth();
+    const month = today.getMonth() + 1;
     const day = today.getDate();
 
-    const photos = await this.prisma.photo.findMany({
-      where: { userId, deletedAt: null, private: false },
-      select: {
-        id: true,
-        createdAt: true,
-        s3Key: true,
-        thumbS3Key: true,
-        filename: true,
-      },
-    });
+    const photos = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        createdAt: Date;
+        s3Key: string;
+        thumbS3Key: string | null;
+        filename: string;
+      }>
+    >`
+      SELECT id, "createdAt", "s3Key", "thumbS3Key", filename
+      FROM "Photo"
+      WHERE "userId" = ${userId}
+        AND "deletedAt" IS NULL
+        AND "private" = false
+        AND EXTRACT(MONTH FROM "createdAt") = ${month}::int
+        AND EXTRACT(DAY FROM "createdAt") = ${day}::int
+        AND EXTRACT(YEAR FROM "createdAt") != ${today.getFullYear()}::int
+      ORDER BY "createdAt" DESC
+    `;
 
-    const matching = photos.filter((p) => {
-      const d = new Date(p.createdAt);
-      return (
-        d.getMonth() === month &&
-        d.getDate() === day &&
-        d.getFullYear() !== today.getFullYear()
-      );
-    });
-
-    const grouped = new Map<number, typeof matching>();
-    for (const p of matching) {
+    const grouped = new Map<number, typeof photos>();
+    for (const p of photos) {
       const year = new Date(p.createdAt).getFullYear();
       const existing = grouped.get(year) || [];
       existing.push(p);
@@ -448,7 +533,7 @@ export class PhotosService {
   }
 
   async softDeletePhoto(userId: string, photoId: string): Promise<void> {
-    const photo = await this.findOwnedPhoto(photoId, userId);
+    await this.findOwnedPhoto(photoId, userId);
 
     await this.prisma.photo.update({
       where: { id: photoId },
@@ -558,7 +643,8 @@ export class PhotosService {
     return { deleted: all.length };
   }
 
-  async emptyTrash(userId: string): Promise<{ deleted: number }> {    const bucket = getBucketName();
+  async emptyTrash(userId: string): Promise<{ deleted: number }> {
+    const bucket = getBucketName();
 
     const trash = await this.prisma.photo.findMany({
       where: { userId, deletedAt: { not: null } },

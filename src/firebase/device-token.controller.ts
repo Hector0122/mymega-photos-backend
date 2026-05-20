@@ -25,17 +25,17 @@ export class DeviceTokenController {
 
     const existing = await this.prisma.deviceToken.findFirst({
       where: { userId: user.id, token: body.token },
-    })
+    });
 
     if (existing) {
       await this.prisma.deviceToken.update({
         where: { id: existing.id },
         data: { token: body.token },
-      })
+      });
     } else {
       await this.prisma.deviceToken.create({
         data: { userId: user.id, token: body.token },
-      })
+      });
     }
     return { ok: true };
   }

@@ -16,8 +16,7 @@
 | 9 | **Filtro por rango de fechas** | `frontend/pages/Home/index.tsx` — modal con `Calendar` (`react-native-calendars`), selección inicio/fin en un solo paso, búsqueda automática; `backend/src/app.service.ts` — `createdAt` gte/lte en Prisma |
 | 10 | **Subida múltiple batch** (selección desde galería) + worker thread + notificación push al terminar | `frontend/pages/Upload/index.tsx` — `launchImageLibrary` con `selectionLimit: 0`, grid de thumbnails, fire-and-forget a `POST /photos/upload-batch`; `backend/src/photos/upload.worker.ts` — worker thread con S3 upload + thumbnail + blurScore + perceptualHash + DB insert + cleanup temp files; `backend/src/photos/photos.service.ts` — `startBatchUpload()` con mapa de progreso y Firebase notificación al completar |
 | 11 | **Edición básica de imagen** (recortar cuadrado) | `frontend/pages/Upload/index.tsx` — `@react-native-community/image-editor` |
-| 12 | **Geolocalización** — ❌ eliminado | — |
-| 13 | **MasonryGrid custom** — Grid 2-columnas propio (reemplazó `react-native-masonry-list`) | `frontend/pages/Home/index.tsx` — implementación manual con `numColumns: 2` |
+| 12 | **MasonryGrid custom** — Grid 2-columnas propio (reemplazó `react-native-masonry-list`) | `frontend/pages/Home/index.tsx` — implementación manual con `numColumns: 2` |
 | 14 | **Splash screen themable** — Fondo blanco (light), #121212 (dark) según tema | `frontend/theme.ts` |
 
 ### Organización
@@ -47,7 +46,6 @@
 | 28 | **Compartir vía enlace (presigned URL)** | `backend/src/app.controller.ts` — `GET /photos/:id/share?expiresIn=`; `frontend/pages/PhotoPreview/index.tsx` — botón "Compartir" |
 | 29 | **Exportar fotos (ZIP + email)** | `backend/src/app.service.ts` — 3 modalidades: todo (`POST /photos/export`), por álbum (`POST /albums/:id/export`), por fecha (`POST /photos/export-by-date`). Genera ZIP con `archiver`, sube a S3, email opcional vía Mailgun |
 | 30 | **Exportación asíncrona con progreso + Firebase notification** | `backend/src/export/export.worker.ts` — worker thread con ZIP + S3 upload + email opcional; `backend/src/export/export.service.ts` — inyecta `FirebaseService`, envía push al completar/fallar; sin polling, sin modal |
-| 31 | **Mapa con geolocalización** — ❌ eliminado | — |
 | 32 | **Tema claro/oscuro** | `frontend/context/ThemeContext.tsx`; `frontend/theme.ts` — colores dinámicos en toda la app |
 | 33 | **Banner de conexión** | `frontend/components/ConnectionBanner.tsx` — indica red disponible/no disponible |
 | 34 | **Skeleton loading + FadeIn** | `frontend/components/Skeleton.tsx`; `frontend/components/FadeInView.tsx` — animaciones de carga |
@@ -124,7 +122,6 @@
 | 16 | **Logout limpia caché** — Borra fotos cacheadas | `AuthContext.tsx` |
 | 17 | **Índices DB en Album** — `@@index([userId])` | `prisma/schema.prisma` |
 | 18 | **`.env.example`** — Creado con todas las variables | `.env.example` |
-| 19 | **Mapa** — Error states, bounding box, callout, cancelación | `pages/Map/index.tsx`, `app.service.ts` |
 | 20 | **PhotoPreview** — Error alerts, loading states, `useWindowDimensions` | `pages/PhotoPreview/index.tsx` |
 | 21 | **Upload** — Validación 500MB, GPS grados/min/seg, limpieza EXIF | `pages/Upload/index.tsx` |
 | 22 | **Álbumes** — Loading state, textos ES, `_count?.photos ?? 0` | `pages/Albums/index.tsx` |
@@ -188,7 +185,6 @@ PersonalProject/
 │   │   ├── PhotoPreview/               # Slideshow (ScrollView), zoom, tags, fav, offline, compartir, iconos ajustados
 │   │   ├── Albums/                     # Lista de álbumes + AlbumView (grid, fecha, portada, rename)
 │   │   │   └── VaultView.tsx           # Caja Fuerte con PIN, grid gallery
-│   │   ├── Map/                        # Mapa con fotos geolocalizadas
 │   │   ├── Profile/                    # Perfil + estadísticas + export
 │   │   ├── Trash/                      # Papelera (restaurar / eliminar permanente)
 │   │   └── Duplicates/                 # Detección de fotos duplicadas

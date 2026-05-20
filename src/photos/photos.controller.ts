@@ -31,7 +31,12 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import * as jwt from 'jsonwebtoken';
 import { PhotosService } from './photos.service';
 import { AnalysisService } from '../analysis/analysis.service';
-import { PRESIGN_EXPIRY, ALLOWED_MIMES, MAX_FILE_SIZE, BATCH_MAX_FILES } from '../common/constants';
+import {
+  PRESIGN_EXPIRY,
+  ALLOWED_MIMES,
+  MAX_FILE_SIZE,
+  BATCH_MAX_FILES,
+} from '../common/constants';
 import { sanitize } from '../common/sanitize';
 
 const uploadTmpDir = path.join(os.tmpdir(), 'vaulta-uploads');
@@ -42,13 +47,21 @@ function uploadOptions() {
   return {
     storage: diskStorage({
       destination: uploadTmpDir,
-      filename: (_req: any, file: Express.Multer.File, cb: (err: Error | null, name: string) => void) => {
+      filename: (
+        _req: any,
+        file: Express.Multer.File,
+        cb: (err: Error | null, name: string) => void,
+      ) => {
         const uniqueName = `${Date.now()}-${crypto.randomUUID()}${path.extname(file.originalname)}`;
         cb(null, uniqueName);
       },
     }),
     limits: { fileSize: MAX_FILE_SIZE },
-    fileFilter: (_req: any, file: Express.Multer.File, cb: (err: Error | null, accept: boolean) => void) => {
+    fileFilter: (
+      _req: any,
+      file: Express.Multer.File,
+      cb: (err: Error | null, accept: boolean) => void,
+    ) => {
       if (ALLOWED_MIMES.includes(file.mimetype)) {
         cb(null, true);
       } else {
@@ -98,9 +111,7 @@ export class PhotosController {
 
   @Post('photos/upload')
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FileInterceptor('file', uploadOptions()),
-  )
+  @UseInterceptors(FileInterceptor('file', uploadOptions()))
   async uploadFile(
     @CurrentUser() user: { id: string },
     @UploadedFile() file: Express.Multer.File,
@@ -112,9 +123,7 @@ export class PhotosController {
 
   @Post('photos/upload-batch')
   @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FilesInterceptor('files', BATCH_MAX_FILES, uploadOptions()),
-  )
+  @UseInterceptors(FilesInterceptor('files', BATCH_MAX_FILES, uploadOptions()))
   async uploadBatch(
     @CurrentUser() user: { id: string },
     @UploadedFiles() files: Express.Multer.File[],
@@ -194,6 +203,14 @@ export class PhotosController {
     @Param('id') id: string,
   ) {
     return { url: await this.photosService.getPhotoUrl(user.id, id) };
+  }
+
+  @Get('photos/:id/detail')
+  async getPhotoDetail(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.photosService.getPhotoDetail(user.id, id);
   }
 
   @Get('photos/:id/share')
@@ -304,7 +321,9 @@ export class PhotosController {
     @Body('confirm') confirm: string,
   ) {
     if (confirm !== 'DELETE_ALL')
-      throw new BadRequestException('Envía { "confirm": "DELETE_ALL" } para confirmar');
+      throw new BadRequestException(
+        'Envía { "confirm": "DELETE_ALL" } para confirmar',
+      );
     return this.photosService.nukeAllPhotos(user.id);
   }
 

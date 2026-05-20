@@ -3,5 +3,5 @@ export function sanitize(input: string, maxLength = 200): string {
     .trim()
     .slice(0, maxLength)
     .replace(/<[^>]*>/g, '')
-    .replace(/[\0\\]/, '')
+    .replace(/[\0\\]/, '');
 }

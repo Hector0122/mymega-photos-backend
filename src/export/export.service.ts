@@ -25,7 +25,10 @@ export class ExportService {
     private firebase: FirebaseService,
   ) {}
 
-  getExportStatus(exportId: string, userId: string): ExportProgress | { status: 'not_found' } {
+  getExportStatus(
+    exportId: string,
+    userId: string,
+  ): ExportProgress | { status: 'not_found' } {
     const exp = this._exports.get(exportId);
     if (!exp || exp.userId !== userId) return { status: 'not_found' };
     return exp;
@@ -156,7 +159,6 @@ export class ExportService {
           p.message = `Worker finalizó con código ${code}`;
         }
       }
-      this._exports.delete(exportId);
     });
 
     return { exportId };

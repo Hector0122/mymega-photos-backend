@@ -7,7 +7,9 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as exifr from 'exifr';
 const req = createRequire(__filename);
-const { computeBlurScore, computePerceptualHash } = req('../common/image-analysis');
+const { computeBlurScore, computePerceptualHash } = req(
+  '../common/image-analysis',
+);
 const { THUMB_RESIZE, THUMB_QUALITY } = req('../common/constants');
 
 interface UploadWorkerInput {
@@ -29,8 +31,10 @@ async function run(input: UploadWorkerInput) {
     endpoint: r2Endpoint,
     forcePathStyle: !!r2Endpoint,
     credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY!,
+      accessKeyId:
+        process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey:
+        process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY!,
     },
     requestHandler: {
       requestTimeout: 300_000,
@@ -60,148 +64,168 @@ async function run(input: UploadWorkerInput) {
     });
   };
 
-  for (const file of files) {
-    try {
-      const buffer = fs.readFileSync(file.path);
-      const exifData = await exifr.parse(buffer, ['DateTimeOriginal']).catch(() => null)
-      const FALLBACK = new Date('1999-01-01')
-      let photoDate = exifData?.DateTimeOriginal || FALLBACK
-      const y = photoDate.getFullYear()
-      if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = FALLBACK
-      const timestamp = photoDate.getTime()
-      const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
-      const isVideo = file.mimeType.startsWith('video/');
+  const CONCURRENCY = 5;
+
+  async function processOne(file: (typeof files)[0]) {
+    const buffer = fs.readFileSync(file.path);
+    const exifData = await exifr
+      .parse(buffer, ['DateTimeOriginal'])
+      .catch(() => null);
+    const FALLBACK = new Date('1999-01-01');
+    let photoDate = exifData?.DateTimeOriginal || FALLBACK;
+    const y = photoDate.getFullYear();
+    if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = FALLBACK;
+    const timestamp = photoDate.getTime();
+    const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
+    const isVideo = file.mimeType.startsWith('video/');
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: fullKey,
+        Body: buffer,
+        ContentType: file.mimeType,
+      }),
+    );
+
+    const url = r2Endpoint
+      ? `${r2Endpoint}/${bucket}/${fullKey}`
+      : `https://${bucket}.s3.${region}.amazonaws.com/${fullKey}`;
+
+    let videoThumbKey: string | undefined;
+
+    if (isVideo) {
+      const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}.jpg`;
+      const thumbPath = file.path + '-thumb.jpg';
+      try {
+        let ffmpegPath: string | null = null;
+        try {
+          const staticPath = req('ffmpeg-static');
+          if (fs.existsSync(staticPath)) ffmpegPath = staticPath;
+        } catch {
+          /* fall through */
+        }
+        if (!ffmpegPath) {
+          try {
+            const { execSync } = await import('child_process');
+            ffmpegPath = execSync('which ffmpeg', {
+              encoding: 'utf8',
+            }).trim();
+          } catch {
+            /* ffmpeg not on PATH */
+          }
+        }
+        if (!ffmpegPath) {
+          console.error(
+            `[UploadWorker] ffmpeg not found, skipping thumbnail for ${file.filename}`,
+          );
+        } else {
+          const ffmpeg = (await import('fluent-ffmpeg')).default;
+          ffmpeg.setFfmpegPath(ffmpegPath);
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(file.path)
+              .on('end', () => resolve())
+              .on('error', reject)
+              .screenshots({
+                count: 1,
+                timemarks: ['1'],
+                filename: path.basename(thumbPath),
+                folder: path.dirname(thumbPath),
+                size: '300x?',
+              });
+          });
+          const thumbBuffer = fs.readFileSync(thumbPath);
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: bucket,
+              Key: thumbKey,
+              Body: thumbBuffer,
+              ContentType: 'image/jpeg',
+            }),
+          );
+          try {
+            fs.unlinkSync(thumbPath);
+          } catch {
+            /* ignore */
+          }
+          videoThumbKey = thumbKey;
+        }
+      } catch (e) {
+        console.error(
+          `[UploadWorker] Thumbnail generation failed for ${file.filename}: ${(e as Error).message}`,
+        );
+      }
+
+      await prisma.photo.create({
+        data: {
+          s3Key: fullKey,
+          thumbS3Key: videoThumbKey,
+          url,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          size: file.size,
+          createdAt: photoDate,
+          userId,
+        },
+      });
+    } else {
+      const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}`;
+      const thumbBuffer = await sharp(buffer)
+        .resize(THUMB_RESIZE)
+        .jpeg({ quality: THUMB_QUALITY })
+        .toBuffer();
 
       await s3.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: fullKey,
-          Body: buffer,
-          ContentType: file.mimeType,
+          Key: thumbKey,
+          Body: thumbBuffer,
+          ContentType: 'image/jpeg',
         }),
       );
 
-      const url = r2Endpoint
-        ? `${r2Endpoint}/${bucket}/${fullKey}`
-        : `https://${bucket}.s3.${region}.amazonaws.com/${fullKey}`;
+      const { blurred, score: blurScore } = await computeBlurScore(buffer);
+      const perceptualHash = await computePerceptualHash(buffer);
 
-      let videoThumbKey: string | undefined
-
-      if (isVideo) {
-        const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}.jpg`;
-        const thumbPath = file.path + '-thumb.jpg';
-        try {
-          let ffmpegPath: string | null = null
-          try {
-            const staticPath = req('ffmpeg-static')
-            if (fs.existsSync(staticPath)) ffmpegPath = staticPath
-          } catch { /* fall through */ }
-          if (!ffmpegPath) {
-            try {
-              const { execSync } = await import('child_process')
-              ffmpegPath = execSync('which ffmpeg', { encoding: 'utf8' }).trim()
-            } catch { /* ffmpeg not on PATH */ }
-          }
-          if (!ffmpegPath) {
-            console.error(`[UploadWorker] ffmpeg not found, skipping thumbnail for ${file.filename}`)
-          } else {
-            const ffmpeg = (await import('fluent-ffmpeg')).default;
-            ffmpeg.setFfmpegPath(ffmpegPath);
-            await new Promise<void>((resolve, reject) => {
-              ffmpeg(file.path)
-                .on('end', () => resolve())
-                .on('error', reject)
-                .screenshots({
-                  count: 1,
-                  timemarks: ['1'],
-                  filename: path.basename(thumbPath),
-                  folder: path.dirname(thumbPath),
-                  size: '300x?',
-                });
-            });
-            const thumbBuffer = fs.readFileSync(thumbPath);
-            await s3.send(
-              new PutObjectCommand({
-                Bucket: bucket,
-                Key: thumbKey,
-                Body: thumbBuffer,
-                ContentType: 'image/jpeg',
-              }),
-            );
-            try {
-              fs.unlinkSync(thumbPath);
-            } catch {
-              /* ignore */
-            }
-            videoThumbKey = thumbKey
-          }
-        } catch (e) {
-          const errMsg = (e as Error).message;
-          lastError += ` thumb:${errMsg}`;
-          console.error(`[UploadWorker] Thumbnail generation failed for ${file.filename}: ${errMsg}`);
-        }
-
-        await prisma.photo.create({
-          data: {
-            s3Key: fullKey,
-            thumbS3Key: videoThumbKey,
-            url,
-            filename: file.filename,
-            mimeType: file.mimeType,
-            size: file.size,
-            createdAt: photoDate,
-            userId,
-          },
-        });
-      } else {
-        const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}`;
-        const thumbBuffer = await sharp(buffer)
-          .resize(THUMB_RESIZE)
-          .jpeg({ quality: THUMB_QUALITY })
-          .toBuffer();
-
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: bucket,
-            Key: thumbKey,
-            Body: thumbBuffer,
-            ContentType: 'image/jpeg',
-          }),
-        );
-
-        const { blurred, score: blurScore } = await computeBlurScore(buffer);
-        const perceptualHash = await computePerceptualHash(buffer);
-
-        await prisma.photo.create({
-          data: {
-            s3Key: fullKey,
-            thumbS3Key: thumbKey,
-            url,
-            filename: file.filename,
-            mimeType: file.mimeType,
-            size: file.size,
-            blurred,
-            blurScore,
-            perceptualHash,
-            createdAt: photoDate,
-            userId,
-          },
-        });
-      }
-
-      completed++;
-      sendProgress(`Subida ${completed} de ${files.length}`);
-    } catch (err) {
-      failed++;
-      lastError = `${file.filename}: ${(err as Error).message}`;
-      sendProgress(`Error: ${lastError}`);
-    } finally {
-      try {
-        fs.unlinkSync(file.path);
-      } catch {
-        /* ignore */
-      }
+      await prisma.photo.create({
+        data: {
+          s3Key: fullKey,
+          thumbS3Key: thumbKey,
+          url,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          size: file.size,
+          blurred,
+          blurScore,
+          perceptualHash,
+          createdAt: photoDate,
+          userId,
+        },
+      });
     }
+  }
+
+  for (let i = 0; i < files.length; i += CONCURRENCY) {
+    const chunk = files.slice(i, i + CONCURRENCY);
+    await Promise.allSettled(
+      chunk.map(async (file) => {
+        try {
+          await processOne(file);
+          completed++;
+          sendProgress(`Subida ${completed} de ${files.length}`);
+        } catch (err) {
+          failed++;
+          lastError = `${file.filename}: ${(err as Error).message}`;
+          sendProgress(`Error: ${lastError}`);
+        } finally {
+          try {
+            fs.unlinkSync(file.path);
+          } catch {
+            /* ignore */
+          }
+        }
+      }),
+    );
   }
 
   await prisma.$disconnect();

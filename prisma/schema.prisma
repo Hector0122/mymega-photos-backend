@@ -41,6 +41,7 @@ model Album {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([userId, vault])
 }
 
 model Photo {
@@ -71,4 +72,9 @@ model Photo {
   @@index([userId])
   @@index([userId, favorite])
   @@index([userId, createdAt])
+  @@index([userId, deletedAt])
+  @@index([userId, deletedAt, createdAt])
+  @@index([userId, deletedAt, private])
+  @@index([userId, blurred])
+  @@index([perceptualHash])
 }

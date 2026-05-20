@@ -24,11 +24,12 @@ export class FirebaseService implements OnModuleInit {
       if (serviceAccountPath) {
         try {
           const resolvedPath = path.resolve(process.cwd(), serviceAccountPath);
-          serviceAccount = JSON.parse(
-            fs.readFileSync(resolvedPath, 'utf-8'),
-          );
+          serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'));
         } catch (err) {
-          this.logger.error('Failed to read Firebase service account file', err);
+          this.logger.error(
+            'Failed to read Firebase service account file',
+            err,
+          );
         }
       }
     }

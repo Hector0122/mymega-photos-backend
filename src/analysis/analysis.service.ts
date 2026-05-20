@@ -3,12 +3,15 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT, getBucketName } from '../common/s3.provider';
-import { computeBlurScore, computePerceptualHash } from '../common/image-analysis';
+import {
+  computeBlurScore,
+  computePerceptualHash,
+} from '../common/image-analysis';
 import { PRESIGN_EXPIRY } from '../common/constants';
 
 @Injectable()
 export class AnalysisService {
-  private readonly logger = new Logger(AnalysisService.name)
+  private readonly logger = new Logger(AnalysisService.name);
 
   constructor(
     private prisma: PrismaService,
@@ -62,7 +65,7 @@ export class AnalysisService {
         await this.analyzePhoto(userId, photo.id);
         analyzed++;
       } catch {
-        this.logger.warn(`Skipping analysis for photo ${photo.id}`)
+        this.logger.warn(`Skipping analysis for photo ${photo.id}`);
       }
     }
     return { analyzed };
