@@ -16,7 +16,7 @@ const ALLOWED_EXTENSIONS = new Set([
   '.mkv',
   '.webm',
 ]);
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 10;
 const BACKEND_URL =
   process.env.BACKEND_URL ||
   process.env.RAILWAY_PUBLIC_URL ||
@@ -149,41 +149,87 @@ async function computePerceptualHash(filePath: string): Promise<string | null> {
   }
 }
 
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 2000;
+
 async function uploadBatch(token: string, files: string[]): Promise<Result[]> {
-  const form = new FormData();
   const fileInfos: { path: string; size: number }[] = [];
+  const buffers: Buffer[] = [];
   for (const filePath of files) {
     const ext = extname(filePath).toLowerCase();
     const buffer = readFileSync(filePath);
-    const blob = new Blob([buffer], { type: getMimeType(ext) });
-    form.append('files', blob, basename(filePath));
+    buffers.push(buffer);
     fileInfos.push({ path: filePath, size: buffer.length });
   }
 
-  try {
-    const res = await fetch(`${BACKEND_URL}/photos/upload-batch`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
-    const ok = res.ok;
-    const text = ok ? '' : await res.text();
-    return fileInfos.map((f) => ({
-      filepath: f.path,
-      filename: basename(f.path),
-      sizeBytes: f.size,
-      status: ok ? ('subido' as const) : ('fallido' as const),
-      error: ok ? '' : `HTTP ${res.status}: ${text}`,
-    }));
-  } catch (err: any) {
-    return fileInfos.map((f) => ({
-      filepath: f.path,
-      filename: basename(f.path),
-      sizeBytes: f.size,
-      status: 'error' as const,
-      error: err.message,
-    }));
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const form = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      const blob = new Blob([new Uint8Array(buffers[i])], {
+        type: getMimeType(extname(files[i]).toLowerCase()),
+      });
+      form.append('files', blob, basename(files[i]));
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/photos/upload-batch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const ok = res.ok;
+      const text = ok ? '' : await res.text();
+      if (ok) {
+        return fileInfos.map((f) => ({
+          filepath: f.path,
+          filename: basename(f.path),
+          sizeBytes: f.size,
+          status: 'subido' as const,
+          error: '',
+        }));
+      }
+      const errMsg = `HTTP ${res.status}: ${text}`;
+      if (attempt < MAX_RETRIES && (res.status >= 500 || res.status === 429)) {
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.error(
+          `  ⚠️  Lote falló con ${res.status}, reintentando en ${delay / 1000}s (intento ${attempt + 1}/${MAX_RETRIES})...`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return fileInfos.map((f) => ({
+        filepath: f.path,
+        filename: basename(f.path),
+        sizeBytes: f.size,
+        status: 'fallido' as const,
+        error: errMsg,
+      }));
+    } catch (err: any) {
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.error(
+          `  ⚠️  Error de red: ${err.message} — reintentando en ${delay / 1000}s (intento ${attempt + 1}/${MAX_RETRIES})...`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return fileInfos.map((f) => ({
+        filepath: f.path,
+        filename: basename(f.path),
+        sizeBytes: f.size,
+        status: 'error' as const,
+        error: err.message,
+      }));
+    }
   }
+
+  return fileInfos.map((f) => ({
+    filepath: f.path,
+    filename: basename(f.path),
+    sizeBytes: f.size,
+    status: 'error' as const,
+    error: 'Max retries exceeded',
+  }));
 }
 
 function formatBytes(bytes: number): string {

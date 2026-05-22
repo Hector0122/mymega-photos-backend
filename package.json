@@ -20,6 +20,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "seed": "npx tsx prisma/seed.ts",
     "subir-masivo": "npx tsx scripts/bulk-upload.ts",
+    "contar-r2": "npx tsx scripts/count-r2.ts",
+    "cruzar-db-r2": "npx tsx scripts/db-r2-diff.ts",
     "clean-dups": "npx tsx scripts/clean-dups.ts",
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
