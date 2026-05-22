@@ -7,7 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as exifr from 'exifr';
 const req = createRequire(__filename);
-const { computeBlurScore, computePerceptualHash } = req(
+const { computePerceptualHash } = req(
   '../common/image-analysis',
 );
 const { THUMB_RESIZE, THUMB_QUALITY } = req('../common/constants');
@@ -186,7 +186,6 @@ async function run(input: UploadWorkerInput) {
         }),
       );
 
-      const { blurred, score: blurScore } = await computeBlurScore(buffer);
       const perceptualHash = await computePerceptualHash(buffer);
 
       await prisma.photo.create({
@@ -197,8 +196,6 @@ async function run(input: UploadWorkerInput) {
           filename: file.filename,
           mimeType: file.mimeType,
           size: file.size,
-          blurred,
-          blurScore,
           perceptualHash,
           createdAt: photoDate,
           userId,

@@ -16,12 +16,6 @@ import { AnalysisService } from './analysis.service';
 export class AnalysisController {
   constructor(private readonly analysisService: AnalysisService) {}
 
-  @Post('photos/analyze-all')
-  @HttpCode(HttpStatus.OK)
-  async analyzeAllPhotos(@CurrentUser() user: { id: string }) {
-    return this.analysisService.analyzeAllPhotos(user.id);
-  }
-
   @Post('photos/:id/analyze')
   @HttpCode(HttpStatus.OK)
   async analyzePhoto(

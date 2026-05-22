@@ -4,7 +4,6 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT, getBucketName } from '../common/s3.provider';
 import {
-  computeBlurScore,
   computePerceptualHash,
 } from '../common/image-analysis';
 import { PRESIGN_EXPIRY } from '../common/constants';
@@ -33,54 +32,21 @@ export class AnalysisService {
     if (!buffer) throw new Error('Empty response body');
 
     const buf = Buffer.from(buffer);
-    const [blurResult, pHash] = await Promise.all([
-      computeBlurScore(buf),
-      computePerceptualHash(buf),
-    ]);
+    const pHash = await computePerceptualHash(buf);
 
     await this.prisma.photo.update({
       where: { id: photoId },
-      data: {
-        blurred: blurResult.blurred,
-        blurScore: blurResult.score,
-        perceptualHash: pHash,
-      },
+      data: { perceptualHash: pHash },
     });
 
-    return {
-      blurred: blurResult.blurred,
-      blurScore: blurResult.score,
-      perceptualHash: pHash,
-    };
-  }
-
-  async analyzeAllPhotos(userId: string): Promise<{ analyzed: number }> {
-    const photos = await this.prisma.photo.findMany({
-      where: { userId, deletedAt: null, private: false, perceptualHash: null },
-    });
-
-    let analyzed = 0;
-    for (const photo of photos) {
-      try {
-        await this.analyzePhoto(userId, photo.id);
-        analyzed++;
-      } catch {
-        this.logger.warn(`Skipping analysis for photo ${photo.id}`);
-      }
-    }
-    return { analyzed };
+    return { perceptualHash: pHash };
   }
 
   async getDuplicates(userId: string) {
     const bucket = getBucketName();
 
-    const photos = await this.prisma.photo.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-        private: false,
-        perceptualHash: { not: null },
-      },
+    const allPhotos = await this.prisma.photo.findMany({
+      where: { userId, deletedAt: null, private: false },
       select: {
         id: true,
         s3Key: true,
@@ -94,8 +60,23 @@ export class AnalysisService {
       orderBy: { createdAt: 'desc' },
     });
 
+    const needsHash = allPhotos.filter(p => !p.perceptualHash);
+    for (const p of needsHash) {
+      try {
+        await this.analyzePhoto(userId, p.id);
+        p.perceptualHash = (await this.prisma.photo.findUnique({
+          where: { id: p.id },
+          select: { perceptualHash: true },
+        }))?.perceptualHash ?? null;
+      } catch {
+        this.logger.warn(`Skipping hash for photo ${p.id}`);
+      }
+    }
+
+    const photosWithHash = allPhotos.filter(p => p.perceptualHash);
+
     const presigned = await Promise.all(
-      photos.map(async (p) => {
+      photosWithHash.map(async (p) => {
         const uri = await getSignedUrl(
           this.s3,
           new GetObjectCommand({

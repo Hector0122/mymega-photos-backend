@@ -215,7 +215,6 @@ export class PhotosService implements OnModuleInit {
     maxKeys: number = 50,
     query?: string,
     favoritesOnly?: boolean,
-    blurryOnly?: boolean,
     privateOnly?: boolean,
     dateFrom?: string,
     dateTo?: string,
@@ -227,7 +226,6 @@ export class PhotosService implements OnModuleInit {
         userId,
         deletedAt: null,
         ...(favoritesOnly ? { favorite: true } : {}),
-        ...(blurryOnly ? { blurred: true } : {}),
         ...(privateOnly ? { private: true } : { private: false }),
         ...(query
           ? {
@@ -452,7 +450,7 @@ export class PhotosService implements OnModuleInit {
   }
 
   async getStats(userId: string) {
-    const [photoCount, albumCount, favoriteCount, blurryCount, storageResult] =
+    const [photoCount, albumCount, favoriteCount, storageResult] =
       await Promise.all([
         this.prisma.photo.count({
           where: { userId, deletedAt: null, private: false },
@@ -461,16 +459,13 @@ export class PhotosService implements OnModuleInit {
         this.prisma.photo.count({
           where: { userId, deletedAt: null, private: false, favorite: true },
         }),
-        this.prisma.photo.count({
-          where: { userId, deletedAt: null, private: false, blurred: true },
-        }),
         this.prisma.photo.aggregate({
           where: { userId, deletedAt: null },
           _sum: { size: true },
         }),
       ]);
     const totalSize = storageResult._sum.size ?? 0;
-    return { photoCount, albumCount, favoriteCount, blurryCount, totalSize };
+    return { photoCount, albumCount, favoriteCount, totalSize };
   }
 
   async togglePrivate(userId: string, photoId: string): Promise<boolean> {
