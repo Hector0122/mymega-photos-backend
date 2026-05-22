@@ -247,6 +247,17 @@ export class PhotosController {
     return { private: isPrivate };
   }
 
+  @Patch('photos/bulk-private')
+  @HttpCode(HttpStatus.OK)
+  async bulkSetPrivate(
+    @CurrentUser() user: { id: string },
+    @Body('ids') ids: string[],
+  ) {
+    if (!Array.isArray(ids) || ids.length === 0)
+      throw new BadRequestException('ids must be a non-empty array');
+    return this.photosService.bulkSetPrivate(user.id, ids);
+  }
+
   @Post('photos/:id/tags')
   @HttpCode(HttpStatus.OK)
   async addTag(

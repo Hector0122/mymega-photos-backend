@@ -28,17 +28,21 @@ export class AlbumsController {
 
   @Get('vault')
   async getVault(@CurrentUser() user: { id: string }) {
-    return this.albums.getVault(user.id);
+    const [mainVault, vaultAlbums] = await Promise.all([
+      this.albums.getVault(user.id),
+      this.albums.listVaultAlbums(user.id),
+    ]);
+    return { mainVault, vaultAlbums };
   }
 
   @Post()
   async create(
     @CurrentUser() user: { id: string },
-    @Body() body: { name: string },
+    @Body() body: { name: string; vault?: boolean },
   ) {
     const name = sanitize(body.name, 100);
     if (!name) throw new BadRequestException('Invalid album name');
-    return this.albums.create(user.id, name);
+    return this.albums.create(user.id, name, body.vault);
   }
 
   @Patch(':id')

@@ -520,6 +520,52 @@ export class PhotosService implements OnModuleInit {
     return updated.private;
   }
 
+  async bulkSetPrivate(
+    userId: string,
+    photoIds: string[],
+  ): Promise<{ marked: number; skipped: number }> {
+    const photos = await this.prisma.photo.findMany({
+      where: { id: { in: photoIds }, userId, deletedAt: null },
+      select: { id: true, private: true },
+    })
+
+    const toMark = photos.filter((p) => !p.private)
+    if (toMark.length === 0) return { marked: 0, skipped: photos.length }
+
+    let vault = await this.prisma.album.findFirst({
+      where: { userId, vault: true },
+    })
+    if (!vault) {
+      vault = await this.prisma.album.create({
+        data: { name: 'Caja Fuerte', userId, vault: true },
+      })
+    }
+
+    const nonVaultAlbums = await this.prisma.album.findMany({
+      where: { userId, vault: false, photos: { some: { id: { in: toMark.map((p) => p.id) } } } },
+      select: { id: true, photos: { select: { id: true }, where: { id: { in: toMark.map((p) => p.id) } } } },
+    })
+
+    await this.prisma.album.update({
+      where: { id: vault.id },
+      data: { photos: { connect: toMark.map((p) => ({ id: p.id })) } },
+    })
+
+    for (const a of nonVaultAlbums) {
+      await this.prisma.album.update({
+        where: { id: a.id },
+        data: { photos: { disconnect: a.photos.map((p) => ({ id: p.id })) } },
+      })
+    }
+
+    await this.prisma.photo.updateMany({
+      where: { id: { in: toMark.map((p) => p.id) } },
+      data: { private: true },
+    })
+
+    return { marked: toMark.length, skipped: photos.length - toMark.length }
+  }
+
   async getPhotoAlbums(
     userId: string,
     photoId: string,

@@ -62,8 +62,51 @@ export class AlbumsService {
 
   async create(userId: string, name: string, vault?: boolean) {
     return this.prisma.album.create({
-      data: { name, userId, vault: vault || false },
+      data: { name, userId, vault: !!vault },
     });
+  }
+
+  async listVaultAlbums(userId: string) {
+    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+    const albums = await this.prisma.album.findMany({
+      where: { userId, vault: true, name: { not: 'Caja Fuerte' } },
+      include: { _count: { select: { photos: true } } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    if (!bucket) return albums;
+
+    const coverIds = albums
+      .filter((a) => a.coverPhotoId)
+      .map((a) => a.coverPhotoId!);
+    const covers = new Map<string, string | null>();
+
+    if (coverIds.length > 0) {
+      const photos = await this.prisma.photo.findMany({
+        where: { id: { in: coverIds } },
+        select: { id: true, thumbS3Key: true, s3Key: true },
+      });
+      await Promise.all(
+        photos.map(async (p) => {
+          covers.set(
+            p.id,
+            await getSignedUrl(
+              this.s3,
+              new GetObjectCommand({
+                Bucket: bucket,
+                Key: p.thumbS3Key || p.s3Key,
+              }),
+              { expiresIn: PRESIGN_EXPIRY },
+            ),
+          );
+        }),
+      );
+    }
+
+    return albums.map((a) => ({
+      ...a,
+      coverUri: covers.get(a.coverPhotoId ?? '') ?? null,
+    }));
   }
 
   async getVault(userId: string) {

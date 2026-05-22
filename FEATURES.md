@@ -87,6 +87,8 @@
 | 66 | **Validación UI: foto en álbum no puede ser privada** | `frontend/pages/PhotoPreview/index.tsx` — consulta `GET /photos/:id/albums`, si está en álbum normal deshabilita el toggle privado con alerta |
 | 67 | **Filtro privacidad en Home** | `frontend/pages/Home/index.tsx` — toggle visibility para ver solo privadas; `backend/src/app.service.ts` — `privateOnly` param |
 | 68 | **Fotos privadas excluidas de export/compartir/"este día"** | `backend/src/app.service.ts` — todas las queries de export, share link y `getThisDayPhotos` filtran `private: false` |
+| 69 | **Fotos privadas en lote (bulk)** | `backend/src/photos/photos.service.ts:523` — `bulkSetPrivate(ids[])`; `backend/src/photos/photos.controller.ts` — `PATCH /photos/bulk-private`; `frontend/components/SelectionBar.tsx` — botón "Privada" en selección múltiple; `frontend/pages/Home/index.tsx` — handler con confirmación |
+| 70 | **Álbumes dentro de la Caja Fuerte** | `backend/src/albums/albums.service.ts:67` — `listVaultAlbums()`; `backend/src/albums/albums.controller.ts` — `POST /albums` acepta `vault: true`, `GET /albums/vault` retorna `{ mainVault, vaultAlbums }`; `frontend/pages/Albums/VaultView.tsx` — vista de carpetas con álbumes vault + FAB para crear sub-álbum + navegación a `AlbumView`
 
 ### Migraciones y mantenimiento
 | # | Feature | Archivos |
@@ -158,6 +160,7 @@
 | 7 | **Autenticación biométrica** — FaceID / Huella para abrir Caja Fuerte | `react-native-biometrics` | Hardware compatible |
 | 8 | **Multi-idioma** — i18n (ES/EN) | `react-native-i18n` o similar | Archivos de traducción |
 | 9 | **Estadísticas de almacenamiento** — "15GB de 50GB usados" | Consultar tamaño total en R2 vs plan | Depende del plan de R2 |
+| 10 | **Reconocimiento facial** — Detectar caras en fotos, comparar similitudes, preguntar nombre al usuario o descartar. Agrupar fotos por persona automáticamente. Buscar por nombre de persona. | Modelo `Face` en Prisma (id, photoId, name, encoding B64, boundingBox JSON, confidence, confirmed). Instalar `@vladmandic/face-api` con TensorFlow.js para detección + descriptores faciales (128 floats). Integrar en upload worker y analysis service. Endpoints: `GET /faces/unconfirmed`, `PATCH /faces/:id` (nombrar), `DELETE /faces/:id` (descartar), `GET /faces/people`, `GET /faces/photos?person=X`. UI: pantalla `Faces` con caras agrupadas por similitud, modal "¿Quién es?" con input o descartar. | Modelos face-api ~30MB. Alta complejidad (ML en backend). |
 
 ## 🔑 Credenciales por defecto
 
@@ -184,7 +187,7 @@ PersonalProject/
 │   │   ├── Upload/                     # Cámara + galería + fire-and-forget batch upload + crop + GPS + video
 │   │   ├── PhotoPreview/               # Slideshow (ScrollView), zoom, tags, fav, offline, compartir, iconos ajustados
 │   │   ├── Albums/                     # Lista de álbumes + AlbumView (grid, fecha, portada, rename)
-│   │   │   └── VaultView.tsx           # Caja Fuerte con PIN, grid gallery
+│   │   │   └── VaultView.tsx           # Caja Fuerte con PIN, vista de carpetas (sub-álbumes vault) + grid de todas las privadas
 │   │   ├── Profile/                    # Perfil + estadísticas + export
 │   │   ├── Trash/                      # Papelera (restaurar / eliminar permanente)
 │   │   └── Duplicates/                 # Detección de fotos duplicadas
