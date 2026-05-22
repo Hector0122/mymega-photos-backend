@@ -23,6 +23,7 @@
     "contar-r2": "npx tsx scripts/count-r2.ts",
     "cruzar-db-r2": "npx tsx scripts/db-r2-diff.ts",
     "clean-dups": "npx tsx scripts/clean-dups.ts",
+    "clean-r2": "npx tsx scripts/clean-r2.ts",
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {

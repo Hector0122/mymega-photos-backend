@@ -68,15 +68,65 @@ async function run(input: UploadWorkerInput) {
 
   async function processOne(file: (typeof files)[0]) {
     const buffer = fs.readFileSync(file.path);
-    const exifData = await exifr
-      .parse(buffer, ['DateTimeOriginal'])
-      .catch(() => null);
-    let photoDate = exifData?.DateTimeOriginal || null;
-    if (photoDate) {
-      const y = photoDate.getFullYear();
-      if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = null;
+    const EXIF_DATE_TAGS = [
+      'DateTimeOriginal',
+      'CreateDate',
+      'DateCreated',
+      'ModifyDate',
+    ]
+    let photoDate: Date | null = null
+    let source = ''
+    const exifData = await exifr.parse(buffer, EXIF_DATE_TAGS).catch(() => null)
+    if (exifData) {
+      for (const tag of EXIF_DATE_TAGS) {
+        const d = exifData[tag]
+        if (d) {
+          photoDate = d
+          source = `exif:${tag}`
+          break
+        }
+      }
     }
-    if (!photoDate) photoDate = new Date();
+    if (photoDate) {
+      const y = photoDate.getFullYear()
+      if (y < 1900 || y > new Date().getFullYear() + 1) {
+        photoDate = null
+        source = ''
+      }
+    }
+    if (!photoDate) {
+      const name = file.filename
+      const patterns: RegExp[] = [
+        /(\d{4})-?(\d{2})-?(\d{2})/,
+        /(\d{4})_(\d{2})(\d{2})/,
+        /IMG[_-](\d{4})(\d{2})(\d{2})/i,
+        /VID[_-](\d{4})(\d{2})(\d{2})/i,
+      ]
+      for (const p of patterns) {
+        const m = name.match(p)
+        if (m) {
+          const y = parseInt(m[1], 10)
+          const mo = parseInt(m[2], 10)
+          const d = parseInt(m[3], 10)
+          if (
+            mo >= 1 &&
+            mo <= 12 &&
+            d >= 1 &&
+            d <= 31 &&
+            y >= 1900 &&
+            y <= new Date().getFullYear() + 1
+          ) {
+            photoDate = new Date(y, mo - 1, d, 12, 0, 0)
+            source = 'filename'
+            break
+          }
+        }
+      }
+    }
+    if (!photoDate) {
+      photoDate = fs.statSync(file.path).mtime
+      source = 'file-mtime'
+    }
     const timestamp = photoDate.getTime();
     const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
     const isVideo = file.mimeType.startsWith('video/');
