@@ -10,8 +10,8 @@ Photo-sharing app: React Native frontend (Android) + NestJS backend + Supabase (
 PersonalProject/
 ├── AI_PLAN.md
 ├── FEATURES.md
-├── frontend/                       # React Native 0.83.1
-└── mymega-photos-backend/          # NestJS 11 API <-- YOU ARE HERE
+├── vaulta_frontend/                # React Native 0.83.1
+└── vaulta_backend/                 # NestJS 11 API <-- YOU ARE HERE
     ├── src/
     │   ├── main.ts                 # Bootstrap + CORS + 500MB body limit + PrismaModule
     │   ├── app.module.ts           # Root module (imports: Auth, Albums, Photos, Export, Analysis, Migration, Firebase, Common)
@@ -114,7 +114,7 @@ PersonalProject/
 
 ### Backend
 ```bash
-cd mymega-photos-backend
+cd vaulta_backend
 npm run build          # compile TS
 npm run start:dev      # watch mode on :3000
 npm run test           # run tests
@@ -122,7 +122,7 @@ npm run test           # run tests
 
 ### Frontend
 ```bash
-cd frontend
+cd vaulta_frontend
 yarn start             # Metro bundler on :8081
 yarn android           # build + install APK
 npx tsc --noEmit       # type-check

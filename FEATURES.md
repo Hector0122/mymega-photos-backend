@@ -180,7 +180,7 @@ PersonalProject/
 ├── AI_PLAN.md                          # Plan de AI + subida masiva
 ├── FEATURES.md                         # Este archivo (feature overview)
 │
-├── frontend/                           # React Native 0.83.1
+├── vaulta_frontend/                    # React Native 0.83.1
 │   ├── pages/
 │   │   ├── Login/                      # Login / Register
 │   │   ├── Home/                       # Grid masonry, búsqueda, FAB, pull-to-refresh, recuerdos, auto-refresh en upload
@@ -230,7 +230,7 @@ PersonalProject/
 │   ├── __tests__/                       # Frontend tests
 │   └── android/                         # Gradle 8.13, JDK 21, notification channel + icon
 │
-└── mymega-photos-backend/               # NestJS 11 API
+└── vaulta_backend/                      # NestJS 11 API
     ├── src/
     │   ├── main.ts                      # Bootstrap + 500MB body limit + CORS
     │   ├── app.module.ts                # Module definition + global ValidationPipe
@@ -289,12 +289,12 @@ PersonalProject/
 
 ```bash
 # Backend
-cd mymega-photos-backend
+cd vaulta_backend
 npm install
 npm run start:dev
 
 # Frontend
-cd frontend
+cd vaulta_frontend
 npm install
 npx react-native start              # Metro
 npx react-native run-android        # Build + install
