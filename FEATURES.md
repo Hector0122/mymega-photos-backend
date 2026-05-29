@@ -15,8 +15,7 @@
 | 8 | **FAB animado expandible** | `frontend/pages/Home/index.tsx` — FAB principal con sub-botones animados (galería + cámara + video) |
 | 9 | **Filtro por rango de fechas** | `frontend/pages/Home/index.tsx` — modal con `Calendar` (`react-native-calendars`), selección inicio/fin en un solo paso, búsqueda automática; `backend/src/app.service.ts` — `createdAt` gte/lte en Prisma |
 | 10 | **Subida múltiple batch** (selección desde galería) + worker thread + notificación push al terminar | `frontend/pages/Upload/index.tsx` — `launchImageLibrary` con `selectionLimit: 0`, grid de thumbnails, fire-and-forget a `POST /photos/upload-batch`; `backend/src/photos/upload.worker.ts` — worker thread con S3 upload + thumbnail + blurScore + perceptualHash + DB insert + cleanup temp files; `backend/src/photos/photos.service.ts` — `startBatchUpload()` con mapa de progreso y Firebase notificación al completar |
-| 11 | **Edición básica de imagen** (recortar cuadrado) | `frontend/pages/Upload/index.tsx` — `@react-native-community/image-editor` |
-| 12 | **MasonryGrid custom** — Grid 2-columnas propio (reemplazó `react-native-masonry-list`) | `frontend/pages/Home/index.tsx` — implementación manual con `numColumns: 2` |
+| 11 | **MasonryGrid custom** — Grid 2-columnas propio (reemplazó `react-native-masonry-list`) | `frontend/pages/Home/index.tsx` — implementación manual con `numColumns: 2` |
 | 14 | **Splash screen themable** — Fondo blanco (light), #121212 (dark) según tema | `frontend/theme.ts` |
 
 ### Organización
@@ -33,11 +32,8 @@
 ### Análisis inteligente
 | # | Feature | Archivos |
 |---|---------|----------|
-| 22 | **Detección de borrosidad** | `backend/src/app.service.ts` — `computeBlurScore` con `sharp` (gradiente Laplaciano); guarda `blurred` + `blurScore` por foto |
-| 23 | **Filtro de fotos borrosas** | `frontend/pages/Home/index.tsx` — icono "blur-off" para filtrar; badge en thumbnail |
-| 24 | **Hash perceptual + detección de duplicados** | `backend/src/app.service.ts` — `computePerceptualHash` (8×8 DCT-style); `GET /photos/duplicates` agrupa por hash; `frontend/pages/Duplicates/` |
-| 25 | **Análisis bulk** | `backend/src/app.controller.ts` — `POST /photos/analyze-all` procesa fotos sin hash |
-| 26 | **Estadísticas** | `backend/src/app.controller.ts` — `GET /photos/stats` devuelve conteo total, álbumes, favoritos, borrosas |
+| 22 | **Hash perceptual + detección de duplicados** | `backend/src/common/image-analysis.ts` — `computePerceptualHash` (8×8 dhash); `GET /photos/duplicates` agrupa por hash; `frontend/pages/Duplicates/` |
+| 23 | **Estadísticas** | `backend/src/app.controller.ts` — `GET /photos/stats` devuelve conteo total, álbumes, favoritos |
 
 ### Utilidades
 | # | Feature | Archivos |
@@ -89,16 +85,17 @@
 | 68 | **Fotos privadas excluidas de export/compartir/"este día"** | `backend/src/app.service.ts` — todas las queries de export, share link y `getThisDayPhotos` filtran `private: false` |
 | 69 | **Fotos privadas en lote (bulk)** | `backend/src/photos/photos.service.ts:523` — `bulkSetPrivate(ids[])`; `backend/src/photos/photos.controller.ts` — `PATCH /photos/bulk-private`; `frontend/components/SelectionBar.tsx` — botón "Privada" en selección múltiple; `frontend/pages/Home/index.tsx` — handler con confirmación |
 | 70 | **Álbumes dentro de la Caja Fuerte** | `backend/src/albums/albums.service.ts:67` — `listVaultAlbums()`; `backend/src/albums/albums.controller.ts` — `POST /albums` acepta `vault: true`, `GET /albums/vault` retorna `{ mainVault, vaultAlbums }`; `frontend/pages/Albums/VaultView.tsx` — vista de carpetas con álbumes vault + FAB para crear sub-álbum + navegación a `AlbumView`
+| 71 | **Autenticación biométrica** — FaceID / Huella para abrir Caja Fuerte | `services/biometrics.ts` — `authenticateWithBiometrics()`; `frontend/pages/Albums/VaultView.tsx` — gate biométrico antes del PIN |
 
 ### Migraciones y mantenimiento
 | # | Feature | Archivos |
 |--:|---------|----------|
-| 69 | **Sincronizar S3 → DB** | `backend/src/app.service.ts` — `POST /photos/sync-s3` backfill; `AUTO_SYNC_S3` en startup |
-| 70 | **Migrar thumbnails** | `backend/src/app.service.ts` — `POST /photos/migrate-thumbnails` genera los que faltan |
-| 71 | **Migrar a carpetas (uploads/ + thumbnails/)** | `backend/src/app.service.ts` — `POST /photos/migrate-folders` reorganiza S3 |
-| 72 | **Migrar fotos privadas a vault** | `backend/src/app.service.ts` — `POST /photos/migrate-vault` conecta privadas existentes a la Caja Fuerte y las desconecta de álbumes normales |
-| 73 | **Usar `.env` real en frontend** | `frontend/.env` → `frontend/api/server/index.ts` via `react-native-config` |
-| 74 | **Limpiar dependencias muertas** | Se eliminaron `expo-image-picker`, `aws-sdk` v2, `multer` |
+| 72 | **Sincronizar S3 → DB** | `backend/src/app.service.ts` — `POST /photos/sync-s3` backfill; `AUTO_SYNC_S3` en startup |
+| 73 | **Migrar thumbnails** | `backend/src/app.service.ts` — `POST /photos/migrate-thumbnails` genera los que faltan |
+| 74 | **Migrar a carpetas (uploads/ + thumbnails/)** | `backend/src/app.service.ts` — `POST /photos/migrate-folders` reorganiza S3 |
+| 75 | **Migrar fotos privadas a vault** | `backend/src/app.service.ts` — `POST /photos/migrate-vault` conecta privadas existentes a la Caja Fuerte y las desconecta de álbumes normales |
+| 76 | **Usar `.env` real en frontend** | `frontend/.env` → `frontend/api/server/index.ts` via `react-native-config` |
+| 77 | **Limpiar dependencias muertas** | Se eliminaron `expo-image-picker`, `aws-sdk` v2, `multer`, `@react-native-community/image-editor` |
 
 ---
 
@@ -137,30 +134,19 @@
 | 30 | **Dead code eliminado** — 5 funciones no usadas en `api/server/index.ts` | `api/server/index.ts` |
 | 31 | **Token en memoria** — `_tokenCache` evita leer AsyncStorage | `api/client.ts` |
 | 32 | **Timeout en fetch** — `AbortController` con 15s | `api/client.ts`, `api/auth.ts` |
-
----
-
-## ❌ Pendientes / Bugs conocidos
-
-| # | Issue | Archivos |
-|---|-------|----------|
-| 1 | **Thumbnails de video** — ffmpeg no se encuentra en Railway (ENOENT con `ffmpeg-static` en pnpm). Se agregó fallback a `which ffmpeg` + `nixpacks.toml` pero no está verificado. | `backend/src/photos/upload.worker.ts` — resolución de ruta ffmpeg; `backend/nixpacks.toml` |
-| 2 | **Pantalla negra al descargar offline** — al tocar el icono de nube (Guardar) en PhotoPreview, la pantalla se queda en negro intermitentemente. Se agregó overlay de carga como workaround. | `frontend/pages/PhotoPreview/index.tsx` — `handleOfflineToggle` |
-| 3 | **Auto-delete papelera 30 días** — implementado en backend (`cleanExpiredTrash` en `onModuleInit`) pero no verificado en producción. | `backend/src/photos/photos.service.ts` |
+| 33 | **401 en stream al descargar/share/offline** — Cabeceras `Authorization` en `RNFS.downloadFile` | `frontend/pages/PhotoPreview/index.tsx`, `frontend/api/offline.ts` |
+| 34 | **Índices de performance** — Migración con índices adicionales | `prisma/migrations/20260520035800_add_performance_indexes/` |
+| 35 | **Device-token upsert** — `findFirst+create/update` evita error composite key en Prisma v7 | `backend/src/firebase/device-token.controller.ts` |
 
 ## 📋 Pendientes / Futuras
 
 | # | Feature | Descripción | Requisitos |
 |---|---|---|---|
 | 1 | **Subida masiva desde disco externo** — Script que copia 100GB de fotos a R2 sin pasar por el celular | Script Node.js que lee fotos del disco duro y las sube al backend. Detección de duplicados, barra de progreso | Plan detallado en `AI_PLAN.md` |
-| 3 | **Upload en segundo plano** — Las subidas continúan aunque cierres la app | Notificación de progreso nativa. WorkManager (Android), NSURLSession (iOS) | Investigar compatibilidad con RN 0.83.1 |
-| 4 | **Sincronización automática con galería** — Escanea DCIM/Camera y sube nuevas fotos | Filtra screenshots/WhatsApp, compara con ya subidas, sube en lote con progreso | Escaneo periódico opcional |
-| 5 | **Búsqueda avanzada** — Por tags, rango de fechas, ubicación, blurry | Mejorar search bar actual con filtros combinados | Backend ya soporta tags, falta UI |
-| 6 | **Álbumes compartidos** — Compartir álbum por enlace | Generar link público con expiración | Requiere nueva endpoint + pantalla |
-| 7 | **Autenticación biométrica** — FaceID / Huella para abrir Caja Fuerte | `react-native-biometrics` | Hardware compatible |
-| 8 | **Multi-idioma** — i18n (ES/EN) | `react-native-i18n` o similar | Archivos de traducción |
-| 9 | **Estadísticas de almacenamiento** — "15GB de 50GB usados" | Consultar tamaño total en R2 vs plan | Depende del plan de R2 |
-| 10 | **Reconocimiento facial** — Detectar caras en fotos, comparar similitudes, preguntar nombre al usuario o descartar. Agrupar fotos por persona automáticamente. Buscar por nombre de persona. | Modelo `Face` en Prisma (id, photoId, name, encoding B64, boundingBox JSON, confidence, confirmed). Instalar `@vladmandic/face-api` con TensorFlow.js para detección + descriptores faciales (128 floats). Integrar en upload worker y analysis service. Endpoints: `GET /faces/unconfirmed`, `PATCH /faces/:id` (nombrar), `DELETE /faces/:id` (descartar), `GET /faces/people`, `GET /faces/photos?person=X`. UI: pantalla `Faces` con caras agrupadas por similitud, modal "¿Quién es?" con input o descartar. | Modelos face-api ~30MB. Alta complejidad (ML en backend). |
+| 2 | **Upload en segundo plano** — Las subidas continúan aunque cierres la app | Notificación de progreso nativa. WorkManager (Android), NSURLSession (iOS) | Investigar compatibilidad con RN 0.83.1 |
+| 3 | **Sincronización automática con galería** — Escanea DCIM/Camera y sube nuevas fotos | Filtra screenshots/WhatsApp, compara con ya subidas, sube en lote con progreso | Escaneo periódico opcional |
+| 4 | **Estadísticas de almacenamiento** — "15GB de 50GB usados" | Consultar tamaño total en R2 vs plan | Depende del plan de R2 |
+| 5 | **Reconocimiento facial** — Detectar caras en fotos, comparar similitudes, preguntar nombre al usuario o descartar. Agrupar fotos por persona automáticamente. Buscar por nombre de persona. | Modelo `Face` en Prisma (id, photoId, name, encoding B64, boundingBox JSON, confidence, confirmed). Instalar `@vladmandic/face-api` con TensorFlow.js para detección + descriptores faciales (128 floats). Integrar en upload worker y analysis service. Endpoints: `GET /faces/unconfirmed`, `PATCH /faces/:id` (nombrar), `DELETE /faces/:id` (descartar), `GET /faces/people`, `GET /faces/photos?person=X`. UI: pantalla `Faces` con caras agrupadas por similitud, modal "¿Quién es?" con input o descartar. | Modelos face-api ~30MB. Alta complejidad (ML en backend). |
 
 ## 🔑 Credenciales por defecto
 
@@ -181,108 +167,128 @@ PersonalProject/
 ├── FEATURES.md                         # Este archivo (feature overview)
 │
 ├── vaulta_frontend/                    # React Native 0.83.1
-│   ├── pages/
-│   │   ├── Login/                      # Login / Register
-│   │   ├── Home/                       # Grid masonry, búsqueda, FAB, pull-to-refresh, recuerdos, auto-refresh en upload
-│   │   ├── Upload/                     # Cámara + galería + fire-and-forget batch upload + crop + GPS + video
-│   │   ├── PhotoPreview/               # Slideshow (ScrollView), zoom, tags, fav, offline, compartir, iconos ajustados
-│   │   ├── Albums/                     # Lista de álbumes + AlbumView (grid, fecha, portada, rename)
-│   │   │   └── VaultView.tsx           # Caja Fuerte con PIN, vista de carpetas (sub-álbumes vault) + grid de todas las privadas
-│   │   ├── Profile/                    # Perfil + estadísticas + export
-│   │   ├── Trash/                      # Papelera (restaurar / eliminar permanente)
-│   │   └── Duplicates/                 # Detección de fotos duplicadas
-│   ├── components/
-│   │   ├── AlbumPickerModal.tsx         # Modal para añadir foto a álbum
-│   │   ├── ConnectionBanner.tsx         # Indicador de red
-│   │   ├── DateRangePicker.tsx          # Calendario para rango de fechas
-│   │   ├── ErrorBoundary.tsx            # Error boundary global
-│   │   ├── ExportProgressModal.tsx      # Progreso de export ZIP
-│   │   ├── FABMenu.tsx                  # Speed-dial FAB (cámara/galería/video)
-│   │   ├── FadeInView.tsx               # Fade-in animation wrapper
-│   │   ├── FilterBar.tsx                # Filtros: fecha, favoritos, blurry
-│   │   ├── LazyCalendar.tsx             # Calendar con React.lazy()
-│   │   ├── RecuerdosSection.tsx         # "On this day" strip
-│   │   ├── SelectionBar.tsx             # Action bar for multi-select
-│   │   ├── Skeleton.tsx                 # Skeleton loaders
-│   │   ├── Toast.tsx                    # Banner animado con posiciones y auto-dismiss
-│   │   ├── UploadQueueBanner.tsx        # Banner de cola de subida
-│   │   ├── VideoPlayer.tsx              # Reproductor de video con play/pause, loading, error+retry
-│   │   └── ZoomableImage.tsx            # Pinch-to-zoom
-│   ├── api/
-│   │   ├── auth.ts                      # Auth API (login/register)
-│   │   ├── cache.ts                     # AsyncStorage photo cache
-│   │   ├── client.ts                    # API client autenticado (JWT Bearer + refresh)
-│   │   ├── notifications.ts             # FCM token registration, foreground handler (modular API v22+)
-│   │   ├── offline.ts                   # Almacenamiento offline en filesystem
-│   │   ├── storage.ts                   # MMKV storage init
-│   │   ├── widget.ts                    # Android widget manager
-│   │   └── server/index.ts              # BASE_URL desde .env
-│   ├── context/
-│   │   ├── AuthContext.tsx               # Estado de autenticación global + refresh
-│   │   ├── NetworkContext.tsx            # Proveedor global de conectividad (NetInfo)
-│   │   ├── ThemeContext.tsx              # Tema claro/oscuro/sistema
-│   │   └── ToastContext.tsx              # Toast global (provider + hook)
-│   ├── services/
-│   │   └── UploadQueue.ts               # Cola MMKV-backed de subida persistente
-│   ├── types/                           # TypeScript declarations
-│   ├── theme.ts                         # Tokens de color + useTheme hook
-│   ├── App.tsx                          # Stack + Tab navigator, auth flow condicional, ToastProvider global
-│   ├── __tests__/                       # Frontend tests
-│   └── android/                         # Gradle 8.13, JDK 21, notification channel + icon
-│
-└── vaulta_backend/                      # NestJS 11 API
-    ├── src/
-    │   ├── main.ts                      # Bootstrap + 500MB body limit + CORS
-    │   ├── app.module.ts                # Module definition + global ValidationPipe
-    │   ├── app.controller.ts            # Rutas base
-    │   ├── app.service.ts               # Servicios base (S3, sharp, Prisma CRUD legacy)
-    │   ├── prisma.module.ts             # PrismaModule global (@Global)
-    │   ├── prisma.service.ts            # PrismaClient wrapper
-    │   ├── auth/                        # JWT auth module
-    │   │   ├── auth.module.ts           # Passport + JWT + Throttler
-    │   │   ├── auth.controller.ts       # POST /auth/login, /register, /refresh, /logout
-    │   │   ├── auth.service.ts          # bcrypt + JWT sign + refresh rotation
-    │   │   ├── auth.service.spec.ts     # Tests
-    │   │   ├── jwt.strategy.ts          # Passport JWT strategy
-    │   │   ├── jwt-auth.guard.ts        # @UseGuards(JwtAuthGuard)
-    │   │   ├── current-user.decorator.ts
-    │   │   ├── skip-auth.decorator.ts   # @SkipAuth()
-    │   │   └── dto/                     # LoginDto, RegisterDto, RefreshTokenDto, UpdateProfileDto
-    │   ├── albums/                      # Albums CRUD module
-    │   │   ├── albums.module.ts
-    │   │   ├── albums.controller.ts     # CRUD + add/remove photos
-    │   │   └── albums.service.ts        # Many-to-many con validaciones (vault, privadas, portada)
-    │   ├── photos/                      # Photos: CRUD, upload-batch, worker thread
-    │   │   ├── photos.module.ts
-    │   │   ├── photos.controller.ts     # 20+ endpoints (CRUD + stream + share + tags + trash + stats + this-day + duplicates)
-    │   │   ├── photos.service.ts        # Lógica de negocio, startBatchUpload con Worker
-    │   │   └── upload.worker.ts         # Worker thread: S3 + thumbnail + blur + hash + DB
-    │   ├── export/                      # Export module: ZIP worker + Firebase push
-    │   │   ├── export.module.ts
-    │   │   ├── export.controller.ts     # POST /photos/export, /albums/:id/export, /photos/export-by-date, GET /exports/:id
-    │   │   ├── export.service.ts        # Gestión de exports + notificaciones push + Mailgun
-    │   │   ├── export.worker.ts         # Worker thread: ZIP, S3 upload, email via Mailgun
-    │   │   └── export.types.ts          # ExportProgress interface
-    │   ├── analysis/                    # Análisis: blur, hash, duplicados
-    │   │   ├── analysis.module.ts
-    │   │   ├── analysis.controller.ts   # POST /photos/analyze-all, /photos/:id/analyze, GET /photos/duplicates
-    │   │   └── analysis.service.ts      # computeBlurScore, computePerceptualHash
-    │   ├── migration/                   # Migraciones S3
-    │   │   ├── migration.module.ts
-    │   │   ├── migration.controller.ts  # 5 endpoints: thumbnails, folders, sync-s3, fix-video-thumbnails, migrate-vault
-    │   │   └── migration.service.ts     # syncS3ToDb, generateMissingThumbnails, migrateToFolders, fixVideoThumbnails, migrateVault
-    │   ├── firebase/                    # Firebase Admin + device token registration
-    │   │   ├── firebase.module.ts
-    │   │   ├── firebase.service.ts      # sendToUser con configuración Android
-    │   │   └── device-token.controller.ts  # POST /device-token
-    │   └── common/                      # S3 provider, exception filter
-    │       ├── s3.module.ts
-    │       ├── s3.provider.ts           # S3Client factory (R2 o AWS)
-    │       └── exception.filter.ts      # Global exception filter
-    └── prisma/
-        ├── schema.prisma                # User + Photo + Album + DeviceToken models
-        ├── seed.ts                      # Seed de usuario demo
-        └── migrations/                  # Migraciones SQL aplicadas
+    │   ├── pages/
+    │   │   ├── Login/                      # Login / Register
+    │   │   ├── Home/                       # Grid masonry, búsqueda, FAB, pull-to-refresh, recuerdos, auto-refresh
+    │   │   │   ├── index.tsx               # Home principal
+    │   │   │   ├── HomeEmptyState.tsx       # Estado vacío
+    │   │   │   ├── PhotoGridItem.tsx        # Item de grid
+    │   │   │   └── utils.ts                # Utilidades de fechas
+    │   │   ├── Upload/                     # Cámara + galería + batch upload + GPS + video
+    │   │   ├── PhotoPreview/               # Slideshow, zoom, tags, fav, offline, compartir
+    │   │   ├── Albums/                     # Lista de álbumes + AlbumView + VaultView
+    │   │   │   └── VaultView.tsx           # Caja Fuerte con PIN + biometría, carpetas vault
+    │   │   ├── Profile/                    # Perfil + estadísticas + export
+    │   │   ├── Trash/                      # Papelera (restaurar / vaciar / eliminar permanente)
+    │   │   └── Duplicates/                 # Detección de fotos duplicadas
+    │   ├── components/
+    │   │   ├── AlbumPickerModal.tsx         # Modal para añadir foto a álbum
+    │   │   ├── ConnectionBanner.tsx         # Indicador de red
+    │   │   ├── DateRangePicker.tsx          # Calendario para rango de fechas
+    │   │   ├── ErrorBoundary.tsx            # Error boundary global
+    │   │   ├── ExportProgressModal.tsx      # Progreso de export ZIP
+    │   │   ├── FABMenu.tsx                  # Speed-dial FAB (cámara/galería/video)
+    │   │   ├── FadeInView.tsx               # Fade-in animation wrapper
+    │   │   ├── FilterBar.tsx                # Filtros: fecha, favoritos
+    │   │   ├── LazyCalendar.tsx             # Calendar con React.lazy()
+    │   │   ├── RecuerdosSection.tsx         # "On this day" strip
+    │   │   ├── SelectionBar.tsx             # Action bar for multi-select
+    │   │   ├── Skeleton.tsx                 # Skeleton loaders
+    │   │   ├── Toast.tsx                    # Banner animado con posiciones y auto-dismiss
+    │   │   ├── UploadQueueBanner.tsx        # Banner de cola de subida
+    │   │   ├── VaultaLogo.tsx               # Logo vectorial
+    │   │   ├── VideoPlayer.tsx              # Reproductor de video con play/pause, loading, error+retry
+    │   │   └── ZoomableImage.tsx            # Pinch-to-zoom
+    │   ├── api/
+    │   │   ├── auth.ts                      # Auth API (login/register)
+    │   │   ├── autoSync.ts                  # Sincronización automática con galería
+    │   │   ├── cache.ts                     # AsyncStorage photo cache
+    │   │   ├── client.ts                    # API client autenticado (JWT Bearer + refresh)
+    │   │   ├── fetchWithTimeout.ts          # Util compartido fetch con timeout
+    │   │   ├── notifications.ts             # FCM token registration, foreground handler
+    │   │   ├── offline.ts                   # Almacenamiento offline en filesystem (con headers auth)
+    │   │   ├── storage.ts                   # MMKV storage init
+    │   │   ├── widget.ts                    # Android widget manager
+    │   │   └── server/index.ts              # BASE_URL desde .env
+    │   ├── context/
+    │   │   ├── AuthContext.tsx               # Estado de autenticación global + refresh
+    │   │   ├── NetworkContext.tsx            # Proveedor global de conectividad (NetInfo)
+    │   │   ├── ThemeContext.tsx              # Tema claro/oscuro/sistema
+    │   │   └── ToastContext.tsx              # Toast global (provider + hook)
+    │   ├── services/
+    │   │   ├── UploadQueue.ts               # Cola MMKV-backed de subida persistente
+    │   │   └── biometrics.ts                # Autenticación biométrica (FaceID/huella)
+    │   ├── types/                           # TypeScript declarations
+    │   ├── utils/
+    │   │   ├── calendarLocales.ts           # Locales para calendario
+    │   │   └── haptics.ts                   # Haptic feedback
+    │   ├── theme.ts                         # Tokens de color + useTheme hook
+    │   ├── App.tsx                          # Stack + Tab navigator, auth flow, ToastProvider
+    │   ├── __tests__/                       # Frontend tests
+    │   └── android/                         # Gradle 8.13, JDK 21, notification channel + icon
+    │
+    └── vaulta_backend/                      # NestJS 11 API
+        ├── scripts/
+        │   ├── bulk-upload.ts               # Subida masiva desde disco externo
+        │   ├── clean-dups.ts                # Limpiar duplicados en R2
+        │   ├── clean-r2.ts                  # Gestionar objetos en R2
+        │   ├── count-r2.ts                  # Contar objetos en R2
+        │   └── db-r2-diff.ts                # Comparar R2 con DB
+        ├── src/
+        │   ├── main.ts                      # Bootstrap + 500MB body limit + CORS
+        │   ├── app.module.ts                # Module definition + global ValidationPipe
+        │   ├── app.controller.ts            # Rutas base
+        │   ├── app.service.ts               # Servicios base (S3, sharp, Prisma CRUD legacy)
+        │   ├── prisma.module.ts             # PrismaModule global (@Global)
+        │   ├── prisma.service.ts            # PrismaClient wrapper
+        │   ├── auth/                        # JWT auth module
+        │   │   ├── auth.module.ts           # Passport + JWT + Throttler
+        │   │   ├── auth.controller.ts       # POST /auth/login, /register, /refresh, /logout
+        │   │   ├── auth.service.ts          # bcrypt + JWT sign + refresh rotation
+        │   │   ├── auth.service.spec.ts     # Tests
+        │   │   ├── jwt.strategy.ts          # Passport JWT strategy
+        │   │   ├── jwt-auth.guard.ts        # @UseGuards(JwtAuthGuard)
+        │   │   ├── current-user.decorator.ts
+        │   │   ├── skip-auth.decorator.ts   # @SkipAuth()
+        │   │   └── dto/                     # LoginDto, RegisterDto, RefreshTokenDto, UpdateProfileDto
+        │   ├── albums/                      # Albums CRUD module
+        │   │   ├── albums.module.ts
+        │   │   ├── albums.controller.ts     # CRUD + add/remove photos + vault albums
+        │   │   └── albums.service.ts        # Many-to-many con validaciones (vault, privadas, portada)
+        │   ├── photos/                      # Photos: CRUD, upload-batch, worker thread
+        │   │   ├── photos.module.ts
+        │   │   ├── photos.controller.ts     # 20+ endpoints (CRUD + stream + share + tags + trash + stats + this-day + duplicates + bulk-private)
+        │   │   ├── photos.service.ts        # Lógica de negocio, startBatchUpload con Worker
+        │   │   └── upload.worker.ts         # Worker thread: S3 + thumbnail + hash + DB
+        │   ├── export/                      # Export module: ZIP worker + Firebase push
+        │   │   ├── export.module.ts
+        │   │   ├── export.controller.ts     # POST /photos/export, /albums/:id/export, /photos/export-by-date, GET /exports/:id
+        │   │   ├── export.service.ts        # Gestión de exports + notificaciones push + Mailgun
+        │   │   ├── export.worker.ts         # Worker thread: ZIP, S3 upload, email via Mailgun
+        │   │   └── export.types.ts          # ExportProgress interface
+        │   ├── analysis/                    # Análisis: hash perceptual, duplicados
+        │   │   ├── analysis.module.ts
+        │   │   ├── analysis.controller.ts   # POST /photos/:id/analyze, GET /photos/duplicates
+        │   │   └── analysis.service.ts      # computePerceptualHash
+        │   ├── migration/                   # Migraciones S3
+        │   │   ├── migration.module.ts
+        │   │   ├── migration.controller.ts  # 5 endpoints: thumbnails, folders, sync-s3, fix-video-thumbnails, migrate-vault
+        │   │   └── migration.service.ts     # syncS3ToDb, generateMissingThumbnails, migrateToFolders, fixVideoThumbnails, migrateVault
+        │   ├── firebase/                    # Firebase Admin + device token registration
+        │   │   ├── firebase.module.ts
+        │   │   ├── firebase.service.ts      # sendToUser con configuración Android
+        │   │   └── device-token.controller.ts  # POST /device-token (upsert)
+        │   └── common/                      # Shared modules
+        │       ├── constants.ts              # Constantes centralizadas (604800, 300, 70, etc.)
+        │       ├── image-analysis.ts         # computeBlurScore, computePerceptualHash extraídos
+        │       ├── s3.module.ts
+        │       ├── s3.provider.ts           # S3Client factory (R2 o AWS) con getBucketName()
+        │       ├── sanitize.ts               # Utilidades de sanitización
+        │       └── exception.filter.ts      # Global exception filter
+        └── prisma/
+            ├── schema.prisma                # 4 modelos: User, Photo, Album, DeviceToken
+            ├── seed.ts                      # Seed de usuario demo
+            └── migrations/                  # 14 migraciones SQL
 ```
 
 ## 🚀 Cómo empezar

@@ -1,36 +1,35 @@
-# Vaulta — Plan de limpieza y bugs
+# Vaulta — Plan de limpieza y bugs (histórico)
 
 ---
 
-## 🐛 Bug: 401 en `/photos/:id/stream` al descargar/compartir/guardar offline
+## ✅ Bugs solventados
 
-### Síntoma
-
-```
-[Nest] 40  - 05/17/2026, 4:59:12 AM   ERROR [AllExceptionsFilter] GET /photos/:id/stream — 401
-    at PhotosController.streamPhoto (/app/src/photos/photos.controller.ts:200:13)
-```
-
-### Causa raíz
-
-El endpoint `/photos/:id/stream` requiere `Authorization: Bearer <token>` o `?token=`.  
-El `<VideoPlayer>` lo envía correctamente vía `headers`, pero tres operaciones usan `RNFS.downloadFile` **sin cabeceras de autenticación**:
-
-| # | Lugar | Archivo | Línea |
-|---|---|---|---|
-| 1 | `handleDownload` | `frontend/pages/PhotoPreview/index.tsx` | 77 |
-| 2 | `handleShare` | `frontend/pages/PhotoPreview/index.tsx` | 92 |
-| 3 | `cachePhoto` | `frontend/api/offline.ts` | 48 |
-
-Todas usan `fullUri || item.uri` como URL. Para videos, `fullUri` es `BASE_URL/photos/:id/stream` → el backend exige auth → `RNFS.downloadFile` no manda headers → 401.
-
-### Fix
-
-Pasar `Authorization: Bearer <token>` como `headers` a `RNFS.downloadFile` en los tres lugares.
+| # | Bug | Fix |
+|---|---|---|
+| 1 | **401 en `/photos/:id/stream`** al descargar/compartir/guardar offline | Cabeceras `Authorization` en `RNFS.downloadFile` — commit `1f8daeb` |
+| 2 | **ffmpeg en Railway** — ENOENT con `ffmpeg-static` | Fallback a `which ffmpeg` + `nixpacks.toml` |
+| 3 | **Pantalla negra al descargar offline** | Overlay de carga |
+| 4 | **Auto-delete papelera 30 días** | Implementado en `cleanExpiredTrash` en `onModuleInit` |
 
 ---
 
-## 🧹 Plan de limpieza de código
+## ✅ Optimizaciones ya implementadas en el remoto
+
+| # | Cambio | Estado |
+|---|---|---|
+| 1 | Extraer `computeBlurScore` y `computePerceptualHash` a `src/common/image-analysis.ts` | ✅ Hecho |
+| 2 | Centralizar `getBucketName()` en `s3.provider.ts` | ✅ Hecho |
+| 3 | Extraer `findOwnedPhoto()` en `photos.service.ts` | ✅ Hecho |
+| 4 | Eliminar `uploadPhoto()` muerto | ✅ Hecho |
+| 5 | Eliminar import no usado `publicObjectUrl` en `export.service.ts` | ✅ Hecho |
+| 6 | Extraer `fetchWithTimeout` a util compartido | ✅ Hecho (`api/fetchWithTimeout.ts`) |
+| 9 | Centralizar `604800` (7 días), `300` (resize), `70` (JPEG quality), `ALLOWED_MIMES` en constantes | ✅ Hecho (`common/constants.ts`) |
+| 12 | Extraer config de upload a factory function | ✅ Hecho |
+| 18 | Dividir `Home/index.tsx` (extraídos `HomeEmptyState.tsx`, `PhotoGridItem.tsx`) | ✅ Hecho |
+
+---
+
+## 🧹 Plan de limpieza de código (pendiente)
 
 Priorizado por tipo de cambio y riesgo.
 
@@ -54,8 +53,6 @@ Priorizado por tipo de cambio y riesgo.
 | 9 | **Centralizar `604800` (7 días)** en constante compartida — aparece en ~10 lugares en 5 archivos | Backend y frontend |
 | 10 | **Centralizar `300` (resize) y `70` (JPEG quality)** en constantes | Backend |
 | 11 | **Eliminar `dateRange()` duplicado** — existe en `Home/index.tsx` y `Home/utils.ts` | Frontend |
-| 12 | **Extraer `ALLOWED_MIMES`, `500*1024*1024`, `50` (batch limit)** a config | `photos.controller.ts` |
-| 13 | **Extraer config de upload (`storage`, `limits`, `fileFilter`)** a factory function — los dos interceptors son idénticos | `photos.controller.ts:88-144` |
 | 14 | **Agregar logging a `catch {}` silenciosos** — ~25 catches vacíos en frontend y 4 en backend | Múltiples archivos |
 
 ### 🥉 Prioridad Baja (cosméticos / opcionales)
@@ -65,22 +62,8 @@ Priorizado por tipo de cambio y riesgo.
 | 15 | **Mover `as any` de `FormData`** a tipo correcto de React Native | `Upload/index.tsx:111`, `UploadQueue.ts:107` |
 | 16 | **Dividir `photos.controller.ts`** (316 → ~150) extrayendo lógica de stream y JWT | Backend |
 | 17 | **Dividir `photos.service.ts`** (650 → servicios más pequeños: crud, upload, analysis) | Backend |
-| 18 | **Dividir `Home/index.tsx`** (601 — más largo del proyecto) | Frontend |
 | 19 | **Eliminar `void` innecesario** en `main.ts:15` y `data: unknown` no usado en decorator | Backend |
 | 20 | **Agregar try-catch a `jwt.verify()`** en `/photos/:id/stream` para que devuelva 401 en vez de 500 | `photos.controller.ts:186-198` |
 | 21 | **Estandarizar semicolon vs no-semicolon** (mix en frontend) | Frontend |
 | 22 | **Eliminar `handleFavoriteToggle` vacío** en `PhotoPreview` | Frontend |
 | 23 | **Eliminar `groupPhotosByDate()` no usado** en `Home/utils.ts` | Frontend |
-
----
-
-### Resumen de impacto
-
-| Métrica | Valor |
-|---|---|
-| Archivos a modificar (sin contar splits) | ~25 |
-| Archivos a crear | 1 (`src/common/image-analysis.ts`) |
-| Líneas de código duplicado eliminadas | ~300+ |
-| `catch {}` silenciosos con logging | ~30 |
-| `any` reemplazados por tipos concretos | ~20 |
-| Constantes extraídas | ~8 |

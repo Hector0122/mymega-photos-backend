@@ -39,8 +39,8 @@ PersonalProject/
     │   ├── photos/                 # Photo management (bulk of endpoints)
     │   │   ├── photos.module.ts
     │   │   ├── photos.controller.ts  # 20+ endpoints
-    │   │   ├── photos.service.ts     # Business logic
-    │   │   └── upload.worker.ts      # Worker thread: S3 upload, sharp thumbnails, ffmpeg video thumbs, blur score, perceptual hash
+    │   │   ├── photos.service.ts     # Business logic (+ bulkSetPrivate)
+    │   │   └── upload.worker.ts      # Worker thread: S3 upload, sharp thumbnails, ffmpeg video thumbs, perceptual hash
     │   │
     │   ├── export/                 # ZIP export + email via Mailgun
     │   │   ├── export.module.ts
@@ -49,10 +49,10 @@ PersonalProject/
     │   │   ├── export.worker.ts      # Worker thread: download from R2, archiver ZIP, upload to R2, email via Mailgun
     │   │   └── export.types.ts       # ExportProgress interface
     │   │
-    │   ├── analysis/               # Image analysis (blur + perceptual hash)
+    │   ├── analysis/               # Image analysis (perceptual hash)
     │   │   ├── analysis.module.ts
-    │   │   ├── analysis.controller.ts  # POST /photos/analyze-all, /photos/:id/analyze, GET /photos/duplicates
-    │   │   └── analysis.service.ts     # computeBlurScore (gradient variance), computePerceptualHash (64-bit dhash)
+    │   │   ├── analysis.controller.ts  # POST /photos/:id/analyze, GET /photos/duplicates
+    │   │   └── analysis.service.ts     # computePerceptualHash (delegates to common/image-analysis.ts)
     │   │
     │   ├── migration/              # S3 → DB migration utilities
     │   │   ├── migration.module.ts
@@ -65,14 +65,23 @@ PersonalProject/
     │   │   └── device-token.controller.ts  # POST /device-token
     │   │
     │   └── common/                 # Shared modules
+    │       ├── constants.ts         # Centralized constants (604800, 300, 70, ALLOWED_MIMES, etc.)
+    │       ├── image-analysis.ts    # computeBlurScore, computePerceptualHash (extracted from 3 files)
     │       ├── s3.module.ts
-    │       ├── s3.provider.ts      # S3 client factory (R2 if R2_ACCOUNT_ID set, else AWS)
+    │       ├── s3.provider.ts      # S3 client factory (R2 if R2_ACCOUNT_ID set, else AWS) + getBucketName()
+    │       ├── sanitize.ts          # Sanitization utilities
     │       └── exception.filter.ts # Global catch-all filter
     │
+    ├── scripts/
+    │   ├── bulk-upload.ts          # Bulk upload from external drive
+    │   ├── clean-dups.ts           # Clean R2 duplicates
+    │   ├── clean-r2.ts             # Manage R2 objects
+    │   ├── count-r2.ts             # Count R2 objects
+    │   └── db-r2-diff.ts           # Compare R2 vs DB records
     ├── prisma/
     │   ├── schema.prisma          # 4 models: User, Photo, Album, DeviceToken
     │   ├── seed.ts                # Demo user (configurable via DEMO_EMAIL, DEMO_PASSWORD, DEMO_NAME)
-    │   └── migrations/            # 13 SQL migrations
+    │   └── migrations/            # 14 SQL migrations
     │
     └── prisma.config.ts           # DATABASE_URL config
 ```
@@ -153,18 +162,28 @@ adb reverse tcp:3000 tcp:3000
 ## Recent changes
 
 - Moved from single `app.service.ts` to modular architecture: `photos/`, `export/`, `analysis/`, `migration/`, `firebase/`, `common/`
-- Worker threads for upload processing (thumbnails, blur, hash) and export (ZIP, email)
+- Worker threads for upload processing (thumbnails, hash) and export (ZIP, email)
 - Video support: thumbnails via ffmpeg, byte-range streaming, `ALLOWED_MIMES` includes video types
 - Firebase push notifications: `DeviceToken` model, `sendToUser()`, triggered on export completion
 - Mailgun integration for export email (replaced nodemailer)
 - 500MB file size limit (was 20MB)
-- 13 database migrations (from init to device-token model)
+- 14 database migrations (from init to add_performance_indexes)
 - SkipAuth decorator for public stream endpoint
 - Global exception filter
+- **Optimización código**: `computeBlurScore`/`computePerceptualHash` extraídos a `common/image-analysis.ts`, `fetchWithTimeout` extraído a util compartido, constantes centralizadas en `common/constants.ts` (604800, 300, 70, etc.)
+- **Bulk private**: `PATCH /photos/bulk-private` + UI en selección múltiple
+- **Vault albums**: sub-álbumes dentro de la Caja Fuerte, `listVaultAlbums()`
+- **Autenticación biométrica**: FaceID/huella para Vault
+- **Todos los bugs solventados**: ffmpeg en Railway, pantalla negra offline, auto-delete papelera, 401 en stream download
+- **Nuevos scripts**: `scripts/` — bulk-upload, clean-dups, clean-r2, count-r2, db-r2-diff
 
 ## Scripts (local laptop)
 
 - **Bulk upload** — `scripts/bulk-upload.ts`, import 100GB from external drive directly to R2. See `AI_PLAN.md`.
+- **Clean R2** — `scripts/clean-r2.ts`, manage/delete R2 objects.
+- **Count R2** — `scripts/count-r2.ts`, count objects in R2 bucket.
+- **Compare R2 vs DB** — `scripts/db-r2-diff.ts`, diff between R2 and database records.
+- **Clean duplicates** — `scripts/clean-dups.ts`, remove duplicate objects from R2.
 
 ## Coding conventions
 
