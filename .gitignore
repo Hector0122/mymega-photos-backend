@@ -36,5 +36,8 @@ coverage/
 # OS
 Thumbs.db
 
+# Face detection models (downloaded at startup)
+models/
+
 # Firebase
 firebase-service-account.json
