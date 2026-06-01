@@ -15,6 +15,7 @@ import { ExportModule } from './export/export.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { MigrationModule } from './migration/migration.module';
+import { FacesModule } from './faces/faces.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { MigrationModule } from './migration/migration.module';
     AnalysisModule,
     MigrationModule,
     FirebaseModule,
+    FacesModule,
   ],
   controllers: [AppController],
   providers: [

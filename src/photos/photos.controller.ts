@@ -94,6 +94,7 @@ export class PhotosController {
     @Query('private') privateOnly?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('person') person?: string,
   ) {
     return this.photosService.getPhotos(
       user.id,
@@ -104,6 +105,7 @@ export class PhotosController {
       privateOnly === 'true',
       dateFrom,
       dateTo,
+      person ? sanitize(person, 50) : undefined,
     );
   }
 
@@ -134,8 +136,14 @@ export class PhotosController {
   }
 
   @Get('photos/this-day')
-  async getThisDayPhotos(@CurrentUser() user: { id: string }) {
-    return this.photosService.getThisDayPhotos(user.id);
+  async getThisDayPhotos(
+    @CurrentUser() user: { id: string },
+    @Query('person') person?: string,
+  ) {
+    return this.photosService.getThisDayPhotos(
+      user.id,
+      person ? sanitize(person, 50) : undefined,
+    );
   }
 
   @Get('photos/stats')

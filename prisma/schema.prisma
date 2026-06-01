@@ -68,6 +68,7 @@ model Photo {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   albums    Album[]
+  faces     Face[]
 
   @@index([userId])
   @@index([userId, favorite])
@@ -77,4 +78,23 @@ model Photo {
   @@index([userId, deletedAt, private])
   @@index([userId, blurred])
   @@index([perceptualHash])
+}
+
+model Face {
+  id          String   @id @default(uuid())
+  photoId     String
+  photo       Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  encoding    Json
+  boxX        Float
+  boxY        Float
+  boxWidth    Float
+  boxHeight   Float
+  personName  String?
+  confirmed   Boolean  @default(false)
+  ignored     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([photoId])
+  @@index([personName])
+  @@index([confirmed, ignored])
 }

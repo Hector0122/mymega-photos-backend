@@ -65,6 +65,7 @@ async function run(input: UploadWorkerInput) {
   };
 
   const CONCURRENCY = 5;
+  const createdPhotoIds: string[] = [];
 
   async function processOne(file: (typeof files)[0]) {
     const buffer = fs.readFileSync(file.path);
@@ -208,7 +209,7 @@ async function run(input: UploadWorkerInput) {
         );
       }
 
-      await prisma.photo.create({
+      const created = await prisma.photo.create({
         data: {
           s3Key: fullKey,
           thumbS3Key: videoThumbKey,
@@ -220,6 +221,7 @@ async function run(input: UploadWorkerInput) {
           userId,
         },
       });
+      createdPhotoIds.push(created.id);
     } else {
       const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}`;
       const thumbBuffer = await sharp(buffer)
@@ -238,7 +240,7 @@ async function run(input: UploadWorkerInput) {
 
       const perceptualHash = await computePerceptualHash(buffer);
 
-      await prisma.photo.create({
+      const created = await prisma.photo.create({
         data: {
           s3Key: fullKey,
           thumbS3Key: thumbKey,
@@ -251,6 +253,7 @@ async function run(input: UploadWorkerInput) {
           userId,
         },
       });
+      createdPhotoIds.push(created.id);
     }
   }
 
@@ -284,6 +287,7 @@ async function run(input: UploadWorkerInput) {
     batchId,
     completed,
     failed,
+    photoIds: createdPhotoIds,
     message: `Subida completada: ${completed} archivo(s) subido(s)${failed > 0 ? `, ${failed} fallaron: ${lastError}` : ''}`,
   });
 }

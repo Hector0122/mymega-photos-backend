@@ -18,6 +18,7 @@ import { Worker } from 'worker_threads';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT, getBucketName } from '../common/s3.provider';
 import { FirebaseService } from '../firebase/firebase.service';
+import { FacesService } from '../faces/faces.service';
 import { PRESIGN_EXPIRY } from '../common/constants';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class PhotosService implements OnModuleInit {
     private prisma: PrismaService,
     @Inject(S3_CLIENT) private s3: S3Client,
     private firebase: FirebaseService,
+    private facesService: FacesService,
   ) {}
 
   onModuleInit() {
@@ -177,6 +179,20 @@ export class PhotosService implements OnModuleInit {
           .catch((err) =>
             this.logger.error('Firebase notification error', err),
           );
+        if (msg.photoIds?.length > 0) {
+          this.facesService
+            .detectBatch(userId, msg.photoIds)
+            .then((result) =>
+              this.logger.log(
+                `Face detection completed for batch ${msg.batchId}: ${result.facesFound} faces found in ${result.processed} photos`,
+              ),
+            )
+            .catch((err) =>
+              this.logger.error(
+                `Face detection failed for batch ${msg.batchId}: ${err.message}`,
+              ),
+            );
+        }
       } else if (msg.type === 'error') {
         this._batches.set(msg.batchId, {
           ...b,
@@ -218,13 +234,32 @@ export class PhotosService implements OnModuleInit {
     privateOnly?: boolean,
     dateFrom?: string,
     dateTo?: string,
+    person?: string,
   ) {
     const bucket = getBucketName();
+
+    let photoIds: string[] | undefined
+
+    if (person) {
+      const faceRecords = await this.prisma.face.findMany({
+        where: {
+          photo: { userId, deletedAt: null, private: false },
+          personName: person,
+          confirmed: true,
+          ignored: false,
+        },
+        select: { photoId: true },
+        distinct: ['photoId'],
+      })
+      photoIds = faceRecords.map((f) => f.photoId)
+      if (photoIds.length === 0) return { photos: [], nextToken: null }
+    }
 
     const dbPhotos = await this.prisma.photo.findMany({
       where: {
         userId,
         deletedAt: null,
+        ...(photoIds ? { id: { in: photoIds } } : {}),
         ...(favoritesOnly ? { favorite: true } : {}),
         ...(privateOnly ? { private: true } : { private: false }),
         ...(query
@@ -389,32 +424,50 @@ export class PhotosService implements OnModuleInit {
     });
     return updated.tags;
   }
-  async getThisDayPhotos(userId: string) {
+  async getThisDayPhotos(userId: string, person?: string) {
     const bucket = getBucketName();
 
     const today = new Date();
     const month = today.getMonth() + 1;
     const day = today.getDate();
 
-    const photos = await this.prisma.$queryRaw<
-      Array<{
-        id: string;
-        createdAt: Date;
-        s3Key: string;
-        thumbS3Key: string | null;
-        filename: string;
-      }>
-    >`
-      SELECT id, "createdAt", "s3Key", "thumbS3Key", filename
-      FROM "Photo"
-      WHERE "userId" = ${userId}
-        AND "deletedAt" IS NULL
-        AND "private" = false
-        AND EXTRACT(MONTH FROM "createdAt") = ${month}::int
-        AND EXTRACT(DAY FROM "createdAt") = ${day}::int
-        AND EXTRACT(YEAR FROM "createdAt") != ${today.getFullYear()}::int
-      ORDER BY "createdAt" DESC
-    `;
+    let photos: Array<{
+      id: string;
+      createdAt: Date;
+      s3Key: string;
+      thumbS3Key: string | null;
+      filename: string;
+    }>
+
+    if (person) {
+      photos = await this.prisma.$queryRaw`
+        SELECT DISTINCT p.id, p."createdAt", p."s3Key", p."thumbS3Key", p.filename
+        FROM "Photo" p
+        INNER JOIN "Face" f ON f."photoId" = p.id
+        WHERE p."userId" = ${userId}
+          AND p."deletedAt" IS NULL
+          AND p."private" = false
+          AND f."personName" = ${person}
+          AND f."confirmed" = true
+          AND f."ignored" = false
+          AND EXTRACT(MONTH FROM p."createdAt") = ${month}::int
+          AND EXTRACT(DAY FROM p."createdAt") = ${day}::int
+          AND EXTRACT(YEAR FROM p."createdAt") != ${today.getFullYear()}::int
+        ORDER BY p."createdAt" DESC
+      `
+    } else {
+      photos = await this.prisma.$queryRaw`
+        SELECT id, "createdAt", "s3Key", "thumbS3Key", filename
+        FROM "Photo"
+        WHERE "userId" = ${userId}
+          AND "deletedAt" IS NULL
+          AND "private" = false
+          AND EXTRACT(MONTH FROM "createdAt") = ${month}::int
+          AND EXTRACT(DAY FROM "createdAt") = ${day}::int
+          AND EXTRACT(YEAR FROM "createdAt") != ${today.getFullYear()}::int
+        ORDER BY "createdAt" DESC
+      `
+    }
 
     const grouped = new Map<number, typeof photos>();
     for (const p of photos) {
@@ -450,7 +503,7 @@ export class PhotosService implements OnModuleInit {
   }
 
   async getStats(userId: string) {
-    const [photoCount, albumCount, favoriteCount, storageResult] =
+    const [photoCount, albumCount, favoriteCount, storageResult, faceCount, peopleResult] =
       await Promise.all([
         this.prisma.photo.count({
           where: { userId, deletedAt: null, private: false },
@@ -463,9 +516,23 @@ export class PhotosService implements OnModuleInit {
           where: { userId, deletedAt: null },
           _sum: { size: true },
         }),
+        this.prisma.face.count({
+          where: { photo: { userId, deletedAt: null }, ignored: false },
+        }),
+        this.prisma.face.groupBy({
+          by: ['personName'],
+          where: {
+            photo: { userId, deletedAt: null },
+            personName: { not: null },
+            confirmed: true,
+            ignored: false,
+          },
+          _count: { id: true },
+        }),
       ]);
     const totalSize = storageResult._sum.size ?? 0;
-    return { photoCount, albumCount, favoriteCount, totalSize };
+    const peopleCount = peopleResult.filter((p) => p.personName).length;
+    return { photoCount, albumCount, favoriteCount, totalSize, faceCount, peopleCount };
   }
 
   async togglePrivate(userId: string, photoId: string): Promise<boolean> {
