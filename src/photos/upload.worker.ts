@@ -40,8 +40,11 @@ async function run(input: UploadWorkerInput) {
       requestTimeout: 300_000,
     },
   });
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('DATABASE_URL is required');
+  const rawUrl = process.env.DATABASE_URL;
+  if (!rawUrl) throw new Error('DATABASE_URL is required');
+  const connectionString = rawUrl.includes('sslmode=')
+    ? rawUrl
+    : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=verify-full`;
   const adapter = new PrismaPg(
     { connectionString },
     { schema: process.env.DATABASE_SCHEMA || 'public' },
