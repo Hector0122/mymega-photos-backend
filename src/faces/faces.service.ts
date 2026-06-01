@@ -7,8 +7,6 @@ import {
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { PrismaService } from '../prisma.service'
 import { S3_CLIENT } from '../common/s3.provider'
-import * as faceapi from '@vladmandic/face-api'
-import * as tf from '@tensorflow/tfjs-node'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as https from 'https'
@@ -29,6 +27,8 @@ interface DetectedFace {
 export class FacesService implements OnModuleInit {
   private readonly logger = new Logger(FacesService.name)
   private _ready = false
+  private faceapi: any = null
+  private tf: any = null
 
   constructor(
     private prisma: PrismaService,
@@ -38,9 +38,11 @@ export class FacesService implements OnModuleInit {
   async onModuleInit() {
     try {
       await this.ensureModelsExist()
-      await faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR)
-      await faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR)
-      await faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR)
+      this.faceapi = await import('@vladmandic/face-api')
+      this.tf = await import('@tensorflow/tfjs-node')
+      await this.faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR)
+      await this.faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR)
+      await this.faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR)
       this._ready = true
       this.logger.log('Face detection models loaded successfully')
     } catch (err) {
@@ -63,12 +65,12 @@ export class FacesService implements OnModuleInit {
       'https://raw.githubusercontent.com/vladmandic/face-api/master/model'
 
     const MODELS = [
-      { file: 'tiny_face_detector_model.bin', shard: false },
-      { file: 'tiny_face_detector_model-weights_manifest.json', shard: false },
-      { file: 'face_landmark_68_model.bin', shard: false },
-      { file: 'face_landmark_68_model-weights_manifest.json', shard: false },
-      { file: 'face_recognition_model.bin', shard: false },
-      { file: 'face_recognition_model-weights_manifest.json', shard: false },
+      { file: 'tiny_face_detector_model.bin' },
+      { file: 'tiny_face_detector_model-weights_manifest.json' },
+      { file: 'face_landmark_68_model.bin' },
+      { file: 'face_landmark_68_model-weights_manifest.json' },
+      { file: 'face_recognition_model.bin' },
+      { file: 'face_recognition_model-weights_manifest.json' },
     ]
 
     for (const { file } of MODELS) {
@@ -139,7 +141,7 @@ export class FacesService implements OnModuleInit {
   }
 
   async detectFaces(photoId: string, userId: string): Promise<DetectedFace[]> {
-    if (!this._ready) {
+    if (!this._ready || !this.faceapi || !this.tf) {
       this.logger.warn('Face detection not ready, skipping')
       return []
     }
@@ -161,28 +163,34 @@ export class FacesService implements OnModuleInit {
     try {
       const buffer = await this.getImageBuffer(photo.s3Key)
 
-      const tensor = tf.node.decodeImage(buffer, 3) as tf.Tensor3D
+      const tensor = this.tf.node.decodeImage(buffer, 3)
       const [h, w] = tensor.shape
 
-      let input: tf.Tensor3D | tf.Tensor4D = tensor
+      let input = tensor
       if (Math.max(w, h) > FACE_DETECT_MAX_WIDTH) {
         const scale = FACE_DETECT_MAX_WIDTH / Math.max(w, h)
-        input = tf.image.resizeBilinear(tensor, [
+        input = this.tf.image.resizeBilinear(tensor, [
           Math.round(h * scale),
           Math.round(w * scale),
         ])
       }
 
-      const detections = await faceapi
-        .detectAllFaces(input as unknown as HTMLCanvasElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+      const detections = await this.faceapi
+        .detectAllFaces(
+          input,
+          new this.faceapi.TinyFaceDetectorOptions({
+            inputSize: 416,
+            scoreThreshold: 0.5,
+          }),
+        )
         .withFaceLandmarks()
         .withFaceDescriptors()
         .run()
 
-      tf.dispose(tensor)
-      if (input !== tensor) tf.dispose(input)
+      this.tf.dispose(tensor)
+      if (input !== tensor) this.tf.dispose(input)
 
-      return detections.map((d) => ({
+      return detections.map((d: any) => ({
         encoding: Array.from(d.descriptor),
         boxX: d.detection.box.x,
         boxY: d.detection.box.y,
@@ -385,14 +393,13 @@ export class FacesService implements OnModuleInit {
     const dbPhotos = await this.prisma.photo.findMany({
       where: {
         id: { in: photoIds },
-        ...(cursor ? { id: { lt: cursor } } : {}),
       },
       take: maxKeys,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { createdAt: 'desc' },
     })
 
     const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || ''
-    const PRESIGN_EXPIRY = 604800
     const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
 
     const results = await Promise.all(
@@ -401,7 +408,7 @@ export class FacesService implements OnModuleInit {
         const uri = await getSignedUrl(
           this.s3,
           new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
-          { expiresIn: PRESIGN_EXPIRY },
+          { expiresIn: 604800 },
         )
         return {
           uri,
@@ -427,16 +434,14 @@ export class FacesService implements OnModuleInit {
     const month = today.getMonth() + 1
     const day = today.getDate()
 
-    const photos = await this.prisma.$queryRaw<
-      Array<{
-        id: string
-        createdAt: Date
-        s3Key: string
-        thumbS3Key: string | null
-        filename: string
-      }>
-    >`
-      SELECT p.id, p."createdAt", p."s3Key", p."thumbS3Key", p.filename
+    const photos: Array<{
+      id: string
+      createdAt: Date
+      s3Key: string
+      thumbS3Key: string | null
+      filename: string
+    }> = await this.prisma.$queryRaw`
+      SELECT DISTINCT p.id, p."createdAt", p."s3Key", p."thumbS3Key", p.filename
       FROM "Photo" p
       INNER JOIN "Face" f ON f."photoId" = p.id
       WHERE p."userId" = ${userId}
