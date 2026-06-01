@@ -29,6 +29,7 @@ export class FacesController {
   async getStatus() {
     return {
       ready: this.facesService.ready,
+      error: this.facesService.lastError || null,
       modelsDir: require('path').join(process.cwd(), 'models', 'face-api'),
     }
   }

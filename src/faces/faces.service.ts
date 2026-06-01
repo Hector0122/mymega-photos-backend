@@ -26,6 +26,7 @@ interface DetectedFace {
 export class FacesService implements OnModuleInit {
   private readonly logger = new Logger(FacesService.name)
   private _ready = false
+  private _error = ''
   private faceapi: any = null
   private tf: any = null
 
@@ -45,14 +46,19 @@ export class FacesService implements OnModuleInit {
       this._ready = true
       this.logger.log('Face detection models loaded successfully')
     } catch (err) {
+      this._error = (err as Error).message
       this.logger.warn(
-        `Face detection models not available: ${(err as Error).message}. Face features disabled.`,
+        `Face detection models not available: ${this._error}. Face features disabled.`,
       )
     }
   }
 
   get ready(): boolean {
     return this._ready
+  }
+
+  get lastError(): string {
+    return this._error
   }
 
   private ensureModelsExist() {
