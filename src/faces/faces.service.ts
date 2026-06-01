@@ -9,7 +9,6 @@ import { PrismaService } from '../prisma.service'
 import { S3_CLIENT } from '../common/s3.provider'
 import * as fs from 'fs'
 import * as path from 'path'
-import * as https from 'https'
 
 const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api')
 const FACE_DETECT_MAX_WIDTH = 1024
@@ -37,7 +36,7 @@ export class FacesService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      await this.ensureModelsExist()
+      this.ensureModelsExist()
       this.faceapi = await import('@vladmandic/face-api')
       this.tf = await import('@tensorflow/tfjs-node')
       await this.faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR)
@@ -56,70 +55,23 @@ export class FacesService implements OnModuleInit {
     return this._ready
   }
 
-  private async ensureModelsExist() {
+  private ensureModelsExist() {
     if (!fs.existsSync(MODELS_DIR)) {
-      fs.mkdirSync(MODELS_DIR, { recursive: true })
+      throw new Error(`Models directory not found: ${MODELS_DIR}`)
     }
-
-    const BASE_URL =
-      'https://raw.githubusercontent.com/vladmandic/face-api/master/model'
-
-    const MODELS = [
-      { file: 'tiny_face_detector_model.bin' },
-      { file: 'tiny_face_detector_model-weights_manifest.json' },
-      { file: 'face_landmark_68_model.bin' },
-      { file: 'face_landmark_68_model-weights_manifest.json' },
-      { file: 'face_recognition_model.bin' },
-      { file: 'face_recognition_model-weights_manifest.json' },
+    const required = [
+      'tiny_face_detector_model.bin',
+      'face_landmark_68_model.bin',
+      'face_recognition_model.bin',
     ]
-
-    for (const { file } of MODELS) {
-      const dest = path.join(MODELS_DIR, file)
-      if (fs.existsSync(dest)) continue
-
-      const url = `${BASE_URL}/${file}`
-      this.logger.log(`Downloading face model: ${file}`)
-      await this.downloadFile(url, dest)
+    const missing = required.filter(
+      (f) => !fs.existsSync(path.join(MODELS_DIR, f)),
+    )
+    if (missing.length > 0) {
+      throw new Error(
+        `Missing face model files: ${missing.join(', ')} in ${MODELS_DIR}`,
+      )
     }
-  }
-
-  private downloadFile(url: string, dest: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(dest)
-      https
-        .get(url, (response) => {
-          if (
-            response.statusCode === 302 ||
-            response.statusCode === 301
-          ) {
-            const redirectUrl = response.headers.location
-            if (redirectUrl) {
-              file.close()
-              fs.unlinkSync(dest)
-              this.downloadFile(redirectUrl, dest)
-                .then(resolve)
-                .catch(reject)
-              return
-            }
-          }
-          if (response.statusCode !== 200) {
-            file.close()
-            fs.unlinkSync(dest)
-            reject(new Error(`HTTP ${response.statusCode} for ${url}`))
-            return
-          }
-          response.pipe(file)
-          file.on('finish', () => {
-            file.close()
-            resolve()
-          })
-        })
-        .on('error', (err) => {
-          file.close()
-          if (fs.existsSync(dest)) fs.unlinkSync(dest)
-          reject(err)
-        })
-    })
   }
 
   private async getImageBuffer(s3Key: string): Promise<Buffer> {

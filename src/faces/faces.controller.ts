@@ -25,6 +25,14 @@ import { sanitize } from '../common/sanitize'
 export class FacesController {
   constructor(private readonly facesService: FacesService) {}
 
+  @Get('status')
+  async getStatus() {
+    return {
+      ready: this.facesService.ready,
+      modelsDir: require('path').join(process.cwd(), 'models', 'face-api'),
+    }
+  }
+
   @Post('detect/:photoId')
   @HttpCode(HttpStatus.OK)
   async detectFaces(
