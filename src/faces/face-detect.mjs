@@ -1,3 +1,8 @@
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+globalThis.require = require
+
 import * as faceapi from '@vladmandic/face-api'
 import * as tf from '@tensorflow/tfjs-node'
 import * as fs from 'fs'
