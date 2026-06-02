@@ -7,8 +7,10 @@ import {
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { PrismaService } from '../prisma.service'
 import { S3_CLIENT } from '../common/s3.provider'
+import { spawn } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as os from 'os'
 
 const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api')
 const FACE_DETECT_MAX_WIDTH = 1024
@@ -27,24 +29,17 @@ export class FacesService implements OnModuleInit {
   private readonly logger = new Logger(FacesService.name)
   private _ready = false
   private _error = ''
-  private faceapi: any = null
-  private tf: any = null
 
   constructor(
     private prisma: PrismaService,
     @Inject(S3_CLIENT) private s3: S3Client,
   ) {}
 
-  async onModuleInit() {
+  onModuleInit() {
     try {
       this.ensureModelsExist()
-      this.faceapi = await import('@vladmandic/face-api')
-      this.tf = await import('@tensorflow/tfjs-node')
-      await this.faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR)
-      await this.faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR)
-      await this.faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR)
       this._ready = true
-      this.logger.log('Face detection models loaded successfully')
+      this.logger.log('Face detection models verified on disk')
     } catch (err) {
       this._error = (err as Error).message
       this.logger.warn(
@@ -98,8 +93,51 @@ export class FacesService implements OnModuleInit {
     return Buffer.concat(chunks)
   }
 
+  private runDetection(imagePath: string): Promise<DetectedFace[]> {
+    return new Promise((resolve, reject) => {
+      const scriptPath = path.join(
+        process.cwd(),
+        'src',
+        'faces',
+        'face-detect.mjs',
+      )
+
+      const proc = spawn('node', [scriptPath, imagePath], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 30000,
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout?.on('data', (data) => {
+        stdout += data.toString()
+      })
+
+      proc.stderr?.on('data', (data) => {
+        stderr += data.toString()
+      })
+
+      proc.on('error', (err) => {
+        resolve([])
+      })
+
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          this.logger.warn(`face-detect.mjs exited with code ${code}: ${stderr}`)
+        }
+        try {
+          const result = JSON.parse(stdout)
+          resolve(result.faces || [])
+        } catch {
+          resolve([])
+        }
+      })
+    })
+  }
+
   async detectFaces(photoId: string, userId: string): Promise<DetectedFace[]> {
-    if (!this._ready || !this.faceapi || !this.tf) {
+    if (!this._ready) {
       this.logger.warn('Face detection not ready, skipping')
       return []
     }
@@ -118,44 +156,24 @@ export class FacesService implements OnModuleInit {
       return []
     }
 
+    const tmpDir = path.join(os.tmpdir(), 'vaulta-faces')
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true })
+    }
+
+    const tmpFile = path.join(tmpDir, `${photoId}${path.extname(photo.s3Key) || '.jpg'}`)
+
     try {
       const buffer = await this.getImageBuffer(photo.s3Key)
+      fs.writeFileSync(tmpFile, buffer)
 
-      const tensor = this.tf.node.decodeImage(buffer, 3)
-      const [h, w] = tensor.shape
+      const faces = await this.runDetection(tmpFile)
 
-      let input = tensor
-      if (Math.max(w, h) > FACE_DETECT_MAX_WIDTH) {
-        const scale = FACE_DETECT_MAX_WIDTH / Math.max(w, h)
-        input = this.tf.image.resizeBilinear(tensor, [
-          Math.round(h * scale),
-          Math.round(w * scale),
-        ])
-      }
+      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
 
-      const detections = await this.faceapi
-        .detectAllFaces(
-          input,
-          new this.faceapi.TinyFaceDetectorOptions({
-            inputSize: 416,
-            scoreThreshold: 0.5,
-          }),
-        )
-        .withFaceLandmarks()
-        .withFaceDescriptors()
-        .run()
-
-      this.tf.dispose(tensor)
-      if (input !== tensor) this.tf.dispose(input)
-
-      return detections.map((d: any) => ({
-        encoding: Array.from(d.descriptor),
-        boxX: d.detection.box.x,
-        boxY: d.detection.box.y,
-        boxWidth: d.detection.box.width,
-        boxHeight: d.detection.box.height,
-      }))
+      return faces
     } catch (err) {
+      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
       this.logger.error(
         `Face detection failed for photo ${photoId}: ${(err as Error).message}`,
       )
@@ -349,9 +367,7 @@ export class FacesService implements OnModuleInit {
     if (photoIds.length === 0) return { photos: [], nextToken: null }
 
     const dbPhotos = await this.prisma.photo.findMany({
-      where: {
-        id: { in: photoIds },
-      },
+      where: { id: { in: photoIds } },
       take: maxKeys,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { createdAt: 'desc' },
