@@ -64,6 +64,13 @@ PersonalProject/
     │   │   ├── firebase.service.ts     # sendToUser(userId, payload), sendToAllUsers
     │   │   └── device-token.controller.ts  # POST /device-token
     │   │
+    │   ├── faces/                  # Face detection & recognition (face-api + sharp)
+    │   │   ├── faces.module.ts
+    │   │   ├── faces.controller.ts     # 13 endpoints: CRUD faces, people, photos by person, stats
+    │   │   ├── faces.service.ts        # Detection via child process, euclidean grouping
+    │   │   ├── face-detect.mjs         # ESM child process: face-api + sharp image decode
+    │   │   └── dto/
+    │   │
     │   └── common/                 # Shared modules
     │       ├── constants.ts         # Centralized constants (604800, 300, 70, ALLOWED_MIMES, etc.)
     │       ├── image-analysis.ts    # computeBlurScore, computePerceptualHash (extracted from 3 files)
@@ -79,9 +86,9 @@ PersonalProject/
     │   ├── count-r2.ts             # Count R2 objects
     │   └── db-r2-diff.ts           # Compare R2 vs DB records
     ├── prisma/
-    │   ├── schema.prisma          # 4 models: User, Photo, Album, DeviceToken
+    │   ├── schema.prisma          # 5 models: User, Photo, Album, DeviceToken, Face
     │   ├── seed.ts                # Demo user (configurable via DEMO_EMAIL, DEMO_PASSWORD, DEMO_NAME)
-    │   └── migrations/            # 14 SQL migrations
+    │   └── migrations/            # 15 SQL migrations
     │
     └── prisma.config.ts           # DATABASE_URL config
 ```
@@ -92,6 +99,7 @@ PersonalProject/
 - **Server-side thumbnails** via `sharp` (300px, 70% quality) + `fluent-ffmpeg` for videos
 - **Blur detection**: downsample to 800x800, grayscale, gradient variance; score < 10 = blurred
 - **Perceptual hash**: 8x8 grayscale, average-threshold, 64-bit hex for duplicate detection
+- **Face detection**: TinyFaceDetector via `@vladmandic/face-api` running in ESM child process (`.mjs`), image decoding via `sharp`, face descriptors (FaceNet 128-dim) stored as JSON, euclidean distance < 0.6 for grouping. Models bundled in repo at `models/face-api/`
 - **Worker threads** (`upload.worker.ts`, `export.worker.ts`) — CPU-heavy tasks off main thread
 - **S3/R2**: auto-detects Cloudflare R2 if `R2_ACCOUNT_ID` set, else falls back to AWS S3
 - **Mailgun** for export emails (not nodemailer)
@@ -176,6 +184,7 @@ adb reverse tcp:3000 tcp:3000
 - **Autenticación biométrica**: FaceID/huella para Vault
 - **Todos los bugs solventados**: ffmpeg en Railway, pantalla negra offline, auto-delete papelera, 401 en stream download
 - **Nuevos scripts**: `scripts/` — bulk-upload, clean-dups, clean-r2, count-r2, db-r2-diff
+- **Reconocimiento facial**: Detección de caras con face-api + sharp, descriptor FaceNet 128-dim, agrupación euclidiana, modelo `Face` en Prisma, auto-detección al subir fotos, People Browser UI, búsqueda/filtro por persona, memorias por persona, stats faciales
 
 ## Scripts (local laptop)
 

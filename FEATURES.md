@@ -34,6 +34,10 @@
 |---|---------|----------|
 | 22 | **Hash perceptual + detección de duplicados** | `backend/src/common/image-analysis.ts` — `computePerceptualHash` (8×8 dhash); `GET /photos/duplicates` agrupa por hash; `frontend/pages/Duplicates/` |
 | 23 | **Estadísticas** | `backend/src/app.controller.ts` — `GET /photos/stats` devuelve conteo total, álbumes, favoritos |
+| 24 | **Reconocimiento facial** — Detección de caras con face-api + sharp, descriptor Facenet de 128 floats, bounding box, agrupación por distancia euclidiana | `backend/src/faces/faces.service.ts` — detección vía child process (`face-detect.mjs`), auto-detección al subir fotos; `backend/prisma/schema.prisma` — modelo `Face`; `frontend/pages/People/` — People Browser + PersonView + modal nombrar; `frontend/components/FilterBar.tsx` — botón caras; `frontend/pages/Albums/` — entrada Personas; `frontend/pages/Profile/` — stats rostros/personas |
+| 25 | **Búsqueda por persona** | `GET /photos?person=X` filtra Home; `GET /faces/photos?person=X` grid de fotos de una persona |
+| 26 | **Memorias por persona** | `GET /photos/this-day?person=X` recuerdos filtrados por persona |
+| 27 | **Estadísticas faciales** | `GET /faces/stats` total rostros, personas, desglose por persona |
 
 ### Utilidades
 | # | Feature | Archivos |
@@ -142,11 +146,9 @@
 
 | # | Feature | Descripción | Requisitos |
 |---|---|---|---|
-| 1 | **Subida masiva desde disco externo** — Script que copia 100GB de fotos a R2 sin pasar por el celular | Script Node.js que lee fotos del disco duro y las sube al backend. Detección de duplicados, barra de progreso | Plan detallado en `AI_PLAN.md` |
-| 2 | **Upload en segundo plano** — Las subidas continúan aunque cierres la app | Notificación de progreso nativa. WorkManager (Android), NSURLSession (iOS) | Investigar compatibilidad con RN 0.83.1 |
-| 3 | **Sincronización automática con galería** — Escanea DCIM/Camera y sube nuevas fotos | Filtra screenshots/WhatsApp, compara con ya subidas, sube en lote con progreso | Escaneo periódico opcional |
-| 4 | **Estadísticas de almacenamiento** — "15GB de 50GB usados" | Consultar tamaño total en R2 vs plan | Depende del plan de R2 |
-| 5 | **Reconocimiento facial** — Detectar caras en fotos, comparar similitudes, preguntar nombre al usuario o descartar. Agrupar fotos por persona automáticamente. Buscar por nombre de persona. | Modelo `Face` en Prisma (id, photoId, name, encoding B64, boundingBox JSON, confidence, confirmed). Instalar `@vladmandic/face-api` con TensorFlow.js para detección + descriptores faciales (128 floats). Integrar en upload worker y analysis service. Endpoints: `GET /faces/unconfirmed`, `PATCH /faces/:id` (nombrar), `DELETE /faces/:id` (descartar), `GET /faces/people`, `GET /faces/photos?person=X`. UI: pantalla `Faces` con caras agrupadas por similitud, modal "¿Quién es?" con input o descartar. | Modelos face-api ~30MB. Alta complejidad (ML en backend). |
+| 1 | **Upload en segundo plano** — Las subidas continúan aunque cierres la app | Notificación de progreso nativa. WorkManager (Android), NSURLSession (iOS) | Investigar compatibilidad con RN 0.83.1 |
+| 2 | **Sincronización automática con galería** — Escanea DCIM/Camera y sube nuevas fotos | Filtra screenshots/WhatsApp, compara con ya subidas, sube en lote con progreso | Escaneo periódico opcional |
+| 3 | **Estadísticas de almacenamiento** — "15GB de 50GB usados" | Consultar tamaño total en R2 vs plan | Depende del plan de R2 |
 
 ## 🔑 Credenciales por defecto
 
@@ -180,7 +182,8 @@ PersonalProject/
     │   │   │   └── VaultView.tsx           # Caja Fuerte con PIN + biometría, carpetas vault
     │   │   ├── Profile/                    # Perfil + estadísticas + export
     │   │   ├── Trash/                      # Papelera (restaurar / vaciar / eliminar permanente)
-    │   │   └── Duplicates/                 # Detección de fotos duplicadas
+    │   │   ├── Duplicates/                 # Detección de fotos duplicadas
+    │   │   └── People/                     # Personas detectadas + PersonView
     │   ├── components/
     │   │   ├── AlbumPickerModal.tsx         # Modal para añadir foto a álbum
     │   │   ├── ConnectionBanner.tsx         # Indicador de red
@@ -274,11 +277,17 @@ PersonalProject/
         │   │   ├── migration.module.ts
         │   │   ├── migration.controller.ts  # 5 endpoints: thumbnails, folders, sync-s3, fix-video-thumbnails, migrate-vault
         │   │   └── migration.service.ts     # syncS3ToDb, generateMissingThumbnails, migrateToFolders, fixVideoThumbnails, migrateVault
-        │   ├── firebase/                    # Firebase Admin + device token registration
-        │   │   ├── firebase.module.ts
-        │   │   ├── firebase.service.ts      # sendToUser con configuración Android
-        │   │   └── device-token.controller.ts  # POST /device-token (upsert)
-        │   └── common/                      # Shared modules
+    │   ├── firebase/                    # Firebase Admin + device token registration
+    │   │   ├── firebase.module.ts
+    │   │   ├── firebase.service.ts      # sendToUser con configuración Android
+    │   │   └── device-token.controller.ts  # POST /device-token (upsert)
+    │   ├── faces/                       # Reconocimiento facial (face-api + sharp)
+    │   │   ├── faces.module.ts
+    │   │   ├── faces.controller.ts      # 13 endpoints: CRUD faces, people, photos by person, stats, merge
+    │   │   ├── faces.service.ts         # Detección vía child process, agrupación euclidiana
+    │   │   ├── face-detect.mjs          # Child process ESM: face-api + sharp image decode
+    │   │   └── dto/                     # UpdateFaceDto, DetectBatchDto, MergePeopleDto
+    │   └── common/                      # Shared modules
         │       ├── constants.ts              # Constantes centralizadas (604800, 300, 70, etc.)
         │       ├── image-analysis.ts         # computeBlurScore, computePerceptualHash extraídos
         │       ├── s3.module.ts
