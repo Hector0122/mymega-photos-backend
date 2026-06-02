@@ -1,13 +1,10 @@
 import { createRequire } from 'module'
-
-const require = createRequire(import.meta.url)
-globalThis.require = require
-
-import * as faceapi from '@vladmandic/face-api'
-import * as tf from '@tensorflow/tfjs-node'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+
+const require = createRequire(import.meta.url)
+globalThis.require = require
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MODELS_DIR = path.join(__dirname, '..', '..', '..', 'models', 'face-api')
@@ -15,6 +12,9 @@ const MODELS_DIR = path.join(__dirname, '..', '..', '..', 'models', 'face-api')
 const FACE_DETECT_MAX_WIDTH = 1024
 
 async function detect(imagePath) {
+  const faceapi = await import('@vladmandic/face-api')
+  const tf = await import('@tensorflow/tfjs-node')
+
   await faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR)
   await faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR)
   await faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR)
