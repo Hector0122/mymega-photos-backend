@@ -50,8 +50,7 @@ export class FacesController {
     @CurrentUser() user: { id: string },
     @Param('photoId') photoId: string,
   ) {
-    const faces = await this.facesService.detectFaces(photoId, user.id)
-    return { faces, count: faces.length, ready: this.facesService.ready }
+    return this.facesService.detectFacesWithDebug(photoId, user.id)
   }
 
   @Post('detect-batch')

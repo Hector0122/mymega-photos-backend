@@ -93,8 +93,8 @@ export class FacesService implements OnModuleInit {
     return Buffer.concat(chunks)
   }
 
-  private runDetection(imagePath: string): Promise<DetectedFace[]> {
-    return new Promise((resolve, reject) => {
+  private runDetection(imagePath: string): Promise<{ faces: DetectedFace[]; stderr: string }> {
+    return new Promise((resolve) => {
       const scriptPath = path.join(
         process.cwd(),
         'src',
@@ -119,7 +119,7 @@ export class FacesService implements OnModuleInit {
       })
 
       proc.on('error', (err) => {
-        resolve([])
+        resolve({ faces: [], stderr: `spawn error: ${err.message}` })
       })
 
       proc.on('close', (code) => {
@@ -128,12 +128,52 @@ export class FacesService implements OnModuleInit {
         }
         try {
           const result = JSON.parse(stdout)
-          resolve(result.faces || [])
+          resolve({ faces: result.faces || [], stderr })
         } catch {
-          resolve([])
+          resolve({ faces: [], stderr: `parse error (code ${code}): ${stderr}` })
         }
       })
     })
+  }
+
+  async detectFacesWithDebug(photoId: string, userId: string): Promise<{ faces: DetectedFace[]; stderr: string; ready: boolean }> {
+    if (!this._ready) {
+      return { faces: [], stderr: `Not ready: ${this._error}`, ready: false }
+    }
+
+    const photo = await this.prisma.photo.findUnique({
+      where: { id: photoId },
+      select: { s3Key: true, mimeType: true, userId: true },
+    })
+
+    if (!photo || photo.userId !== userId) {
+      return { faces: [], stderr: 'Photo not found', ready: this._ready }
+    }
+
+    if (photo.mimeType.startsWith('video/')) {
+      return { faces: [], stderr: 'Video, skipping', ready: this._ready }
+    }
+
+    const tmpDir = path.join(os.tmpdir(), 'vaulta-faces')
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true })
+    }
+
+    const tmpFile = path.join(tmpDir, `${photoId}${path.extname(photo.s3Key) || '.jpg'}`)
+
+    try {
+      const buffer = await this.getImageBuffer(photo.s3Key)
+      fs.writeFileSync(tmpFile, buffer)
+
+      const result = await this.runDetection(tmpFile)
+
+      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+
+      return { faces: result.faces, stderr: result.stderr, ready: this._ready }
+    } catch (err) {
+      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+      return { faces: [], stderr: `Error: ${(err as Error).message}`, ready: this._ready }
+    }
   }
 
   async detectFaces(photoId: string, userId: string): Promise<DetectedFace[]> {
@@ -167,7 +207,7 @@ export class FacesService implements OnModuleInit {
       const buffer = await this.getImageBuffer(photo.s3Key)
       fs.writeFileSync(tmpFile, buffer)
 
-      const faces = await this.runDetection(tmpFile)
+      const { faces } = await this.runDetection(tmpFile)
 
       try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
 
