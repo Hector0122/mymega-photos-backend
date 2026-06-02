@@ -13,24 +13,21 @@ const FACE_DETECT_MAX_WIDTH = 1024
 
 async function detect(imagePath) {
   const faceapi = await import('@vladmandic/face-api')
-  const tf = await import('@tensorflow/tfjs-node')
+  const tf = faceapi.tf || (await import('@tensorflow/tfjs'))
 
   await faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR)
   await faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR)
   await faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR)
 
-  const buffer = fs.readFileSync(imagePath)
-  const tensor = tf.node.decodeImage(buffer, 3)
-  const [h, w] = tensor.shape
+  const sharp = (await import('sharp')).default
+  const { data, info } = await sharp(fs.readFileSync(imagePath))
+    .resize(FACE_DETECT_MAX_WIDTH, FACE_DETECT_MAX_WIDTH, { fit: 'inside', withoutEnlargement: true })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
 
-  let input = tensor
-  if (Math.max(w, h) > FACE_DETECT_MAX_WIDTH) {
-    const scale = FACE_DETECT_MAX_WIDTH / Math.max(w, h)
-    input = tf.image.resizeBilinear(tensor, [
-      Math.round(h * scale),
-      Math.round(w * scale),
-    ])
-  }
+  const tensor = tf.tensor3d(data, [info.height, info.width, info.channels], 'int32')
+  const input = tf.cast(tensor, 'float32')
 
   const detections = await faceapi
     .detectAllFaces(
@@ -45,7 +42,7 @@ async function detect(imagePath) {
     .run()
 
   tf.dispose(tensor)
-  if (input !== tensor) tf.dispose(input)
+  tf.dispose(input)
 
   return detections.map((d) => ({
     encoding: Array.from(d.descriptor),
