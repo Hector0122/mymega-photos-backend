@@ -16,7 +16,7 @@ const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api')
 const FACE_DETECT_MAX_WIDTH = 1024
 const MATCH_THRESHOLD = 0.6
 
-interface DetectedFace {
+export interface DetectedFace {
   encoding: number[]
   boxX: number
   boxY: number
