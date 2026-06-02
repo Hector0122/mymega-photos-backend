@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url)
 globalThis.require = require
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const MODELS_DIR = path.join(__dirname, '..', '..', '..', 'models', 'face-api')
+const MODELS_DIR = path.join(__dirname, '..', '..', 'models', 'face-api')
 
 const FACE_DETECT_MAX_WIDTH = 1024
 
