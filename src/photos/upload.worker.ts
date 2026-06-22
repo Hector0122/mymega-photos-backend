@@ -85,7 +85,6 @@ async function run(input: UploadWorkerInput) {
         const d = exifData[tag];
         if (d) {
           photoDate = d;
-          source = `exif:${tag}`;
           break;
         }
       }
@@ -94,7 +93,6 @@ async function run(input: UploadWorkerInput) {
       const y = photoDate.getFullYear();
       if (y < 1900 || y > new Date().getFullYear() + 1) {
         photoDate = null;
-        source = '';
       }
     }
     if (!photoDate) {
@@ -120,7 +118,6 @@ async function run(input: UploadWorkerInput) {
             y <= new Date().getFullYear() + 1
           ) {
             photoDate = new Date(y, mo - 1, d, 12, 0, 0);
-            source = 'filename';
             break;
           }
         }
