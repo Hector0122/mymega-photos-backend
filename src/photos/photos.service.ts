@@ -238,7 +238,7 @@ export class PhotosService implements OnModuleInit {
   ) {
     const bucket = getBucketName();
 
-    let photoIds: string[] | undefined
+    let photoIds: string[] | undefined;
 
     if (person) {
       const faceRecords = await this.prisma.face.findMany({
@@ -250,9 +250,9 @@ export class PhotosService implements OnModuleInit {
         },
         select: { photoId: true },
         distinct: ['photoId'],
-      })
-      photoIds = faceRecords.map((f) => f.photoId)
-      if (photoIds.length === 0) return { photos: [], nextToken: null }
+      });
+      photoIds = faceRecords.map((f) => f.photoId);
+      if (photoIds.length === 0) return { photos: [], nextToken: null };
     }
 
     const dbPhotos = await this.prisma.photo.findMany({
@@ -437,7 +437,7 @@ export class PhotosService implements OnModuleInit {
       s3Key: string;
       thumbS3Key: string | null;
       filename: string;
-    }>
+    }>;
 
     if (person) {
       photos = await this.prisma.$queryRaw`
@@ -454,7 +454,7 @@ export class PhotosService implements OnModuleInit {
           AND EXTRACT(DAY FROM p."createdAt") = ${day}::int
           AND EXTRACT(YEAR FROM p."createdAt") != ${today.getFullYear()}::int
         ORDER BY p."createdAt" DESC
-      `
+      `;
     } else {
       photos = await this.prisma.$queryRaw`
         SELECT id, "createdAt", "s3Key", "thumbS3Key", filename
@@ -466,7 +466,7 @@ export class PhotosService implements OnModuleInit {
           AND EXTRACT(DAY FROM "createdAt") = ${day}::int
           AND EXTRACT(YEAR FROM "createdAt") != ${today.getFullYear()}::int
         ORDER BY "createdAt" DESC
-      `
+      `;
     }
 
     const grouped = new Map<number, typeof photos>();
@@ -503,36 +503,49 @@ export class PhotosService implements OnModuleInit {
   }
 
   async getStats(userId: string) {
-    const [photoCount, albumCount, favoriteCount, storageResult, faceCount, peopleResult] =
-      await Promise.all([
-        this.prisma.photo.count({
-          where: { userId, deletedAt: null, private: false },
-        }),
-        this.prisma.album.count({ where: { userId } }),
-        this.prisma.photo.count({
-          where: { userId, deletedAt: null, private: false, favorite: true },
-        }),
-        this.prisma.photo.aggregate({
-          where: { userId, deletedAt: null },
-          _sum: { size: true },
-        }),
-        this.prisma.face.count({
-          where: { photo: { userId, deletedAt: null }, ignored: false },
-        }),
-        this.prisma.face.groupBy({
-          by: ['personName'],
-          where: {
-            photo: { userId, deletedAt: null },
-            personName: { not: null },
-            confirmed: true,
-            ignored: false,
-          },
-          _count: { id: true },
-        }),
-      ]);
+    const [
+      photoCount,
+      albumCount,
+      favoriteCount,
+      storageResult,
+      faceCount,
+      peopleResult,
+    ] = await Promise.all([
+      this.prisma.photo.count({
+        where: { userId, deletedAt: null, private: false },
+      }),
+      this.prisma.album.count({ where: { userId } }),
+      this.prisma.photo.count({
+        where: { userId, deletedAt: null, private: false, favorite: true },
+      }),
+      this.prisma.photo.aggregate({
+        where: { userId, deletedAt: null },
+        _sum: { size: true },
+      }),
+      this.prisma.face.count({
+        where: { photo: { userId, deletedAt: null }, ignored: false },
+      }),
+      this.prisma.face.groupBy({
+        by: ['personName'],
+        where: {
+          photo: { userId, deletedAt: null },
+          personName: { not: null },
+          confirmed: true,
+          ignored: false,
+        },
+        _count: { id: true },
+      }),
+    ]);
     const totalSize = storageResult._sum.size ?? 0;
     const peopleCount = peopleResult.filter((p) => p.personName).length;
-    return { photoCount, albumCount, favoriteCount, totalSize, faceCount, peopleCount };
+    return {
+      photoCount,
+      albumCount,
+      favoriteCount,
+      totalSize,
+      faceCount,
+      peopleCount,
+    };
   }
 
   async togglePrivate(userId: string, photoId: string): Promise<boolean> {
@@ -589,43 +602,53 @@ export class PhotosService implements OnModuleInit {
     const photos = await this.prisma.photo.findMany({
       where: { id: { in: photoIds }, userId, deletedAt: null },
       select: { id: true, private: true },
-    })
+    });
 
-    const toMark = photos.filter((p) => !p.private)
-    if (toMark.length === 0) return { marked: 0, skipped: photos.length }
+    const toMark = photos.filter((p) => !p.private);
+    if (toMark.length === 0) return { marked: 0, skipped: photos.length };
 
     let vault = await this.prisma.album.findFirst({
       where: { userId, vault: true },
-    })
+    });
     if (!vault) {
       vault = await this.prisma.album.create({
         data: { name: 'Caja Fuerte', userId, vault: true },
-      })
+      });
     }
 
     const nonVaultAlbums = await this.prisma.album.findMany({
-      where: { userId, vault: false, photos: { some: { id: { in: toMark.map((p) => p.id) } } } },
-      select: { id: true, photos: { select: { id: true }, where: { id: { in: toMark.map((p) => p.id) } } } },
-    })
+      where: {
+        userId,
+        vault: false,
+        photos: { some: { id: { in: toMark.map((p) => p.id) } } },
+      },
+      select: {
+        id: true,
+        photos: {
+          select: { id: true },
+          where: { id: { in: toMark.map((p) => p.id) } },
+        },
+      },
+    });
 
     await this.prisma.album.update({
       where: { id: vault.id },
       data: { photos: { connect: toMark.map((p) => ({ id: p.id })) } },
-    })
+    });
 
     for (const a of nonVaultAlbums) {
       await this.prisma.album.update({
         where: { id: a.id },
         data: { photos: { disconnect: a.photos.map((p) => ({ id: p.id })) } },
-      })
+      });
     }
 
     await this.prisma.photo.updateMany({
       where: { id: { in: toMark.map((p) => p.id) } },
       data: { private: true },
-    })
+    });
 
-    return { marked: toMark.length, skipped: photos.length - toMark.length }
+    return { marked: toMark.length, skipped: photos.length - toMark.length };
   }
 
   async getPhotoAlbums(

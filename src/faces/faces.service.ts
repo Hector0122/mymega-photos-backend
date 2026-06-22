@@ -1,34 +1,28 @@
-import {
-  Injectable,
-  Inject,
-  Logger,
-  OnModuleInit,
-} from '@nestjs/common'
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
-import { PrismaService } from '../prisma.service'
-import { S3_CLIENT } from '../common/s3.provider'
-import { spawn } from 'child_process'
-import * as fs from 'fs'
-import * as path from 'path'
-import * as os from 'os'
+import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { PrismaService } from '../prisma.service';
+import { S3_CLIENT } from '../common/s3.provider';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
-const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api')
-const FACE_DETECT_MAX_WIDTH = 1024
-const MATCH_THRESHOLD = 0.6
+const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api');
+const MATCH_THRESHOLD = 0.5;
 
 export interface DetectedFace {
-  encoding: number[]
-  boxX: number
-  boxY: number
-  boxWidth: number
-  boxHeight: number
+  encoding: number[];
+  boxX: number;
+  boxY: number;
+  boxWidth: number;
+  boxHeight: number;
 }
 
 @Injectable()
 export class FacesService implements OnModuleInit {
-  private readonly logger = new Logger(FacesService.name)
-  private _ready = false
-  private _error = ''
+  private readonly logger = new Logger(FacesService.name);
+  private _ready = false;
+  private _error = '';
 
   constructor(
     private prisma: PrismaService,
@@ -37,196 +31,232 @@ export class FacesService implements OnModuleInit {
 
   onModuleInit() {
     try {
-      this.ensureModelsExist()
-      this._ready = true
-      this.logger.log('Face detection models verified on disk')
+      this.ensureModelsExist();
+      this._ready = true;
+      this.logger.log('Face detection models verified on disk');
     } catch (err) {
-      this._error = (err as Error).message
+      this._error = (err as Error).message;
       this.logger.warn(
         `Face detection models not available: ${this._error}. Face features disabled.`,
-      )
+      );
     }
   }
 
   get ready(): boolean {
-    return this._ready
+    return this._ready;
   }
 
   get lastError(): string {
-    return this._error
+    return this._error;
   }
 
   private ensureModelsExist() {
     if (!fs.existsSync(MODELS_DIR)) {
-      throw new Error(`Models directory not found: ${MODELS_DIR}`)
+      throw new Error(`Models directory not found: ${MODELS_DIR}`);
     }
     const required = [
       'tiny_face_detector_model.bin',
       'face_landmark_68_model.bin',
       'face_recognition_model.bin',
-    ]
+    ];
     const missing = required.filter(
       (f) => !fs.existsSync(path.join(MODELS_DIR, f)),
-    )
+    );
     if (missing.length > 0) {
       throw new Error(
         `Missing face model files: ${missing.join(', ')} in ${MODELS_DIR}`,
-      )
+      );
     }
   }
 
   private async getImageBuffer(s3Key: string): Promise<Buffer> {
     const bucket =
-      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || ''
+      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
 
     const response = await this.s3.send(
       new GetObjectCommand({ Bucket: bucket, Key: s3Key }),
-    )
+    );
 
-    const chunks: Uint8Array[] = []
-    if (!response.Body) throw new Error('Empty response from S3')
-    const stream = response.Body as NodeJS.ReadableStream
+    const chunks: Uint8Array[] = [];
+    if (!response.Body) throw new Error('Empty response from S3');
+    const stream = response.Body as NodeJS.ReadableStream;
     for await (const chunk of stream) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
     }
 
-    return Buffer.concat(chunks)
+    return Buffer.concat(chunks);
   }
 
-  private runDetection(imagePath: string): Promise<{ faces: DetectedFace[]; stderr: string }> {
+  private runDetection(
+    imagePath: string,
+  ): Promise<{ faces: DetectedFace[]; stderr: string }> {
     return new Promise((resolve) => {
       const scriptPath = path.join(
         process.cwd(),
         'src',
         'faces',
         'face-detect.mjs',
-      )
+      );
 
       const proc = spawn('node', [scriptPath, imagePath], {
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 30000,
-      })
+      });
 
-      let stdout = ''
-      let stderr = ''
+      let stdout = '';
+      let stderr = '';
 
       proc.stdout?.on('data', (data) => {
-        stdout += data.toString()
-      })
+        stdout += data.toString();
+      });
 
       proc.stderr?.on('data', (data) => {
-        stderr += data.toString()
-      })
+        stderr += data.toString();
+      });
 
       proc.on('error', (err) => {
-        resolve({ faces: [], stderr: `spawn error: ${err.message}` })
-      })
+        resolve({ faces: [], stderr: `spawn error: ${err.message}` });
+      });
 
       proc.on('close', (code) => {
         if (code !== 0) {
-          this.logger.warn(`face-detect.mjs exited with code ${code}: ${stderr}`)
+          this.logger.warn(
+            `face-detect.mjs exited with code ${code}: ${stderr}`,
+          );
         }
         try {
-          const result = JSON.parse(stdout)
-          resolve({ faces: result.faces || [], stderr })
+          const result = JSON.parse(stdout);
+          resolve({ faces: result.faces || [], stderr });
         } catch {
-          resolve({ faces: [], stderr: `parse error (code ${code}): ${stderr}` })
+          resolve({
+            faces: [],
+            stderr: `parse error (code ${code}): ${stderr}`,
+          });
         }
-      })
-    })
+      });
+    });
   }
 
-  async detectFacesWithDebug(photoId: string, userId: string): Promise<{ faces: DetectedFace[]; stderr: string; ready: boolean }> {
+  async detectFacesWithDebug(
+    photoId: string,
+    userId: string,
+  ): Promise<{ faces: DetectedFace[]; stderr: string; ready: boolean }> {
     if (!this._ready) {
-      return { faces: [], stderr: `Not ready: ${this._error}`, ready: false }
+      return { faces: [], stderr: `Not ready: ${this._error}`, ready: false };
     }
 
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
       select: { s3Key: true, mimeType: true, userId: true },
-    })
+    });
 
     if (!photo || photo.userId !== userId) {
-      return { faces: [], stderr: 'Photo not found', ready: this._ready }
+      return { faces: [], stderr: 'Photo not found', ready: this._ready };
     }
 
     if (photo.mimeType.startsWith('video/')) {
-      return { faces: [], stderr: 'Video, skipping', ready: this._ready }
+      return { faces: [], stderr: 'Video, skipping', ready: this._ready };
     }
 
-    const tmpDir = path.join(os.tmpdir(), 'vaulta-faces')
+    const tmpDir = path.join(os.tmpdir(), 'vaulta-faces');
     if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true })
+      fs.mkdirSync(tmpDir, { recursive: true });
     }
 
-    const tmpFile = path.join(tmpDir, `${photoId}${path.extname(photo.s3Key) || '.jpg'}`)
+    const tmpFile = path.join(
+      tmpDir,
+      `${photoId}${path.extname(photo.s3Key) || '.jpg'}`,
+    );
 
     try {
-      const buffer = await this.getImageBuffer(photo.s3Key)
-      fs.writeFileSync(tmpFile, buffer)
+      const buffer = await this.getImageBuffer(photo.s3Key);
+      fs.writeFileSync(tmpFile, buffer);
 
-      const result = await this.runDetection(tmpFile)
+      const result = await this.runDetection(tmpFile);
 
-      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        /* ignore */
+      }
 
-      return { faces: result.faces, stderr: result.stderr, ready: this._ready }
+      return { faces: result.faces, stderr: result.stderr, ready: this._ready };
     } catch (err) {
-      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
-      return { faces: [], stderr: `Error: ${(err as Error).message}`, ready: this._ready }
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        /* ignore */
+      }
+      return {
+        faces: [],
+        stderr: `Error: ${(err as Error).message}`,
+        ready: this._ready,
+      };
     }
   }
 
   async detectFaces(photoId: string, userId: string): Promise<DetectedFace[]> {
     if (!this._ready) {
-      this.logger.warn('Face detection not ready, skipping')
-      return []
+      this.logger.warn('Face detection not ready, skipping');
+      return [];
     }
 
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
       select: { s3Key: true, mimeType: true, userId: true },
-    })
+    });
 
     if (!photo || photo.userId !== userId) {
-      throw new Error('Photo not found')
+      throw new Error('Photo not found');
     }
 
-    const isVideo = photo.mimeType.startsWith('video/')
+    const isVideo = photo.mimeType.startsWith('video/');
     if (isVideo) {
-      return []
+      return [];
     }
 
-    const tmpDir = path.join(os.tmpdir(), 'vaulta-faces')
+    const tmpDir = path.join(os.tmpdir(), 'vaulta-faces');
     if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true })
+      fs.mkdirSync(tmpDir, { recursive: true });
     }
 
-    const tmpFile = path.join(tmpDir, `${photoId}${path.extname(photo.s3Key) || '.jpg'}`)
+    const tmpFile = path.join(
+      tmpDir,
+      `${photoId}${path.extname(photo.s3Key) || '.jpg'}`,
+    );
 
     try {
-      const buffer = await this.getImageBuffer(photo.s3Key)
-      fs.writeFileSync(tmpFile, buffer)
+      const buffer = await this.getImageBuffer(photo.s3Key);
+      fs.writeFileSync(tmpFile, buffer);
 
-      const { faces } = await this.runDetection(tmpFile)
+      const { faces } = await this.runDetection(tmpFile);
 
-      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        /* ignore */
+      }
 
-      return faces
+      return faces;
     } catch (err) {
-      try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        /* ignore */
+      }
       this.logger.error(
         `Face detection failed for photo ${photoId}: ${(err as Error).message}`,
-      )
-      return []
+      );
+      return [];
     }
   }
 
   async detectAndSave(photoId: string, userId: string): Promise<number> {
-    const faces = await this.detectFaces(photoId, userId)
+    const faces = await this.detectFaces(photoId, userId);
 
-    if (faces.length === 0) return 0
+    if (faces.length === 0) return 0;
 
-    await this.prisma.face.deleteMany({ where: { photoId } })
+    await this.prisma.face.deleteMany({ where: { photoId } });
 
     await this.prisma.face.createMany({
       data: faces.map((f) => ({
@@ -237,81 +267,97 @@ export class FacesService implements OnModuleInit {
         boxWidth: f.boxWidth,
         boxHeight: f.boxHeight,
       })),
-    })
+    });
 
     const existingNames = await this.prisma.face.findMany({
       where: { personName: { not: null }, confirmed: true },
       select: { personName: true, encoding: true },
       distinct: ['personName'],
-    })
+    });
 
     if (existingNames.length > 0) {
       const newFaces = await this.prisma.face.findMany({
         where: { photoId, personName: null, ignored: false },
-      })
+      });
 
       for (const face of newFaces) {
-        const encoding = face.encoding as number[]
-        let bestMatch = ''
-        let bestDistance = Infinity
+        const encoding = face.encoding as number[];
+        let bestMatch = '';
+        let bestDistance = Infinity;
 
         for (const existing of existingNames) {
-          if (!existing.personName) continue
-          const existingEncoding = existing.encoding as number[]
-          const dist = this.euclideanDistance(encoding, existingEncoding)
+          if (!existing.personName) continue;
+          const existingEncoding = existing.encoding as number[];
+          const dist = this.euclideanDistance(encoding, existingEncoding);
           if (dist < MATCH_THRESHOLD && dist < bestDistance) {
-            bestDistance = dist
-            bestMatch = existing.personName
+            bestDistance = dist;
+            bestMatch = existing.personName;
           }
         }
 
         if (bestMatch) {
           await this.prisma.face.update({
             where: { id: face.id },
-            data: { personName: bestMatch },
-          })
+            data: { personName: bestMatch, confirmed: true },
+          });
         }
       }
     }
 
-    return faces.length
+    return faces.length;
   }
 
-  async detectBatch(userId: string, photoIds: string[]): Promise<{ processed: number; facesFound: number; failed: number }> {
-    let processed = 0
-    let facesFound = 0
-    let failed = 0
+  async detectBatch(
+    userId: string,
+    photoIds: string[],
+  ): Promise<{ processed: number; facesFound: number; failed: number }> {
+    let processed = 0;
+    let facesFound = 0;
+    let failed = 0;
 
     for (const photoId of photoIds) {
       try {
-        const count = await this.detectAndSave(photoId, userId)
-        processed++
-        facesFound += count
+        const count = await this.detectAndSave(photoId, userId);
+        processed++;
+        facesFound += count;
       } catch (err) {
-        this.logger.error(`Failed to detect faces for ${photoId}: ${(err as Error).message}`)
-        failed++
+        this.logger.error(
+          `Failed to detect faces for ${photoId}: ${(err as Error).message}`,
+        );
+        failed++;
       }
     }
 
-    return { processed, facesFound, failed }
+    return { processed, facesFound, failed };
   }
 
-  async detectAll(userId: string): Promise<{ processed: number; facesFound: number; failed: number }> {
+  async detectAll(
+    userId: string,
+  ): Promise<{ processed: number; facesFound: number; failed: number }> {
     const photos = await this.prisma.photo.findMany({
       where: { userId, deletedAt: null },
       select: { id: true, mimeType: true, _count: { select: { faces: true } } },
-    })
+    });
 
     const photoIds = photos
       .filter((p) => !p.mimeType.startsWith('video/') && p._count.faces === 0)
-      .map((p) => p.id)
+      .map((p) => p.id);
 
-    if (photoIds.length === 0) return { processed: 0, facesFound: 0, failed: 0 }
+    if (photoIds.length === 0)
+      return { processed: 0, facesFound: 0, failed: 0 };
 
-    return this.detectBatch(userId, photoIds)
+    return this.detectBatch(userId, photoIds);
   }
 
-  async getPeople(userId: string): Promise<{ name: string; faceCount: number; photoCount: number; thumbnailPhotoId: string | null }[]> {
+  async getPeople(userId: string): Promise<
+    {
+      name: string;
+      faceCount: number;
+      photoCount: number;
+      thumbnailPhotoId: string | null;
+      thumbnailUri: string | null;
+    }[]
+  > {
     const faces = await this.prisma.face.findMany({
       where: {
         photo: { userId, deletedAt: null },
@@ -325,33 +371,58 @@ export class FacesService implements OnModuleInit {
         photo: { select: { id: true, thumbS3Key: true, s3Key: true } },
       },
       orderBy: { createdAt: 'desc' },
-    })
+    });
 
-    const byPerson = new Map<string, { faceCount: number; photoIds: Set<string>; firstPhoto: typeof faces[0]['photo'] | null }>()
+    const byPerson = new Map<
+      string,
+      {
+        faceCount: number;
+        photoIds: Set<string>;
+        firstPhoto: (typeof faces)[0]['photo'] | null;
+      }
+    >();
 
     for (const f of faces) {
-      if (!f.personName) continue
-      let entry = byPerson.get(f.personName)
+      if (!f.personName) continue;
+      let entry = byPerson.get(f.personName);
       if (!entry) {
-        entry = { faceCount: 0, photoIds: new Set(), firstPhoto: null }
-        byPerson.set(f.personName, entry)
+        entry = { faceCount: 0, photoIds: new Set(), firstPhoto: null };
+        byPerson.set(f.personName, entry);
       }
-      entry.faceCount++
-      entry.photoIds.add(f.photoId)
-      if (!entry.firstPhoto) entry.firstPhoto = f.photo
+      entry.faceCount++;
+      entry.photoIds.add(f.photoId);
+      if (!entry.firstPhoto) entry.firstPhoto = f.photo;
     }
 
-    return Array.from(byPerson.entries())
-      .map(([name, data]) => ({
-        name,
-        faceCount: data.faceCount,
-        photoCount: data.photoIds.size,
-        thumbnailPhotoId: data.firstPhoto?.id ?? null,
-      }))
-      .sort((a, b) => b.photoCount - a.photoCount)
+    const bucket =
+      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+
+    return Promise.all(
+      Array.from(byPerson.entries()).map(async ([name, data]) => {
+        let thumbnailUri: string | null = null;
+        if (data.firstPhoto) {
+          const thumbKey = data.firstPhoto.thumbS3Key || data.firstPhoto.s3Key;
+          thumbnailUri = await getSignedUrl(
+            this.s3,
+            new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
+            { expiresIn: 604800 },
+          );
+        }
+        return {
+          name,
+          faceCount: data.faceCount,
+          photoCount: data.photoIds.size,
+          thumbnailPhotoId: data.firstPhoto?.id ?? null,
+          thumbnailUri,
+        };
+      }),
+    ).then((results) => results.sort((a, b) => b.photoCount - a.photoCount));
   }
 
-  async getUnconfirmed(userId: string): Promise<{ id: string; photoId: string; photoUri: string | null }[]> {
+  async getUnconfirmed(
+    userId: string,
+  ): Promise<{ id: string; photoId: string; photoUri: string | null }[]> {
     const faces = await this.prisma.face.findMany({
       where: {
         photo: { userId, deletedAt: null },
@@ -365,24 +436,25 @@ export class FacesService implements OnModuleInit {
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
-    })
+    });
 
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || ''
+    const bucket =
+      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
 
-    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
     const results = await Promise.all(
       faces.map(async (f) => {
-        const thumbKey = f.photo.thumbS3Key || f.photo.s3Key
+        const thumbKey = f.photo.thumbS3Key || f.photo.s3Key;
         const uri = await getSignedUrl(
           this.s3,
           new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
           { expiresIn: 604800 },
-        )
-        return { id: f.id, photoId: f.photoId, photoUri: uri }
+        );
+        return { id: f.id, photoId: f.photoId, photoUri: uri };
       }),
-    )
+    );
 
-    return results
+    return results;
   }
 
   async getPhotosByPerson(
@@ -400,30 +472,31 @@ export class FacesService implements OnModuleInit {
       },
       select: { photoId: true },
       distinct: ['photoId'],
-    })
+    });
 
-    const photoIds = facePhotoIds.map((f) => f.photoId)
+    const photoIds = facePhotoIds.map((f) => f.photoId);
 
-    if (photoIds.length === 0) return { photos: [], nextToken: null }
+    if (photoIds.length === 0) return { photos: [], nextToken: null };
 
     const dbPhotos = await this.prisma.photo.findMany({
       where: { id: { in: photoIds } },
       take: maxKeys,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { createdAt: 'desc' },
-    })
+    });
 
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || ''
-    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+    const bucket =
+      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
 
     const results = await Promise.all(
       dbPhotos.map(async (photo) => {
-        const thumbKey = photo.thumbS3Key || photo.s3Key
+        const thumbKey = photo.thumbS3Key || photo.s3Key;
         const uri = await getSignedUrl(
           this.s3,
           new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
           { expiresIn: 604800 },
-        )
+        );
         return {
           uri,
           date: photo.createdAt.toISOString().slice(0, 10),
@@ -433,27 +506,27 @@ export class FacesService implements OnModuleInit {
           blurred: photo.blurred,
           private: photo.private,
           mimeType: photo.mimeType,
-        }
+        };
       }),
-    )
+    );
 
     const nextToken =
-      dbPhotos.length === maxKeys ? dbPhotos[dbPhotos.length - 1].id : null
+      dbPhotos.length === maxKeys ? dbPhotos[dbPhotos.length - 1].id : null;
 
-    return { photos: results, nextToken }
+    return { photos: results, nextToken };
   }
 
   async getThisDayByPerson(userId: string, personName: string) {
-    const today = new Date()
-    const month = today.getMonth() + 1
-    const day = today.getDate()
+    const today = new Date();
+    const month = today.getMonth() + 1;
+    const day = today.getDate();
 
     const photos: Array<{
-      id: string
-      createdAt: Date
-      s3Key: string
-      thumbS3Key: string | null
-      filename: string
+      id: string;
+      createdAt: Date;
+      s3Key: string;
+      thumbS3Key: string | null;
+      filename: string;
     }> = await this.prisma.$queryRaw`
       SELECT DISTINCT p.id, p."createdAt", p."s3Key", p."thumbS3Key", p.filename
       FROM "Photo" p
@@ -468,30 +541,31 @@ export class FacesService implements OnModuleInit {
         AND EXTRACT(DAY FROM p."createdAt") = ${day}::int
         AND EXTRACT(YEAR FROM p."createdAt") != ${today.getFullYear()}::int
       ORDER BY p."createdAt" DESC
-    `
+    `;
 
-    const grouped = new Map<number, typeof photos>()
+    const grouped = new Map<number, typeof photos>();
     for (const p of photos) {
-      const year = new Date(p.createdAt).getFullYear()
-      const existing = grouped.get(year) || []
-      existing.push(p)
-      grouped.set(year, existing)
+      const year = new Date(p.createdAt).getFullYear();
+      const existing = grouped.get(year) || [];
+      existing.push(p);
+      grouped.set(year, existing);
     }
 
-    const bucket = process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || ''
-    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+    const bucket =
+      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
 
     return Promise.all(
       Array.from(grouped.entries())
         .sort(([a], [b]) => b - a)
         .map(async ([year, yearPhotos]) => {
-          const photo = yearPhotos[0]
-          const thumbKey = photo.thumbS3Key || photo.s3Key
+          const photo = yearPhotos[0];
+          const thumbKey = photo.thumbS3Key || photo.s3Key;
           const uri = await getSignedUrl(
             this.s3,
             new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
             { expiresIn: 604800 },
-          )
+          );
           return {
             year,
             uri,
@@ -500,12 +574,16 @@ export class FacesService implements OnModuleInit {
             person: personName,
             count: yearPhotos.length,
             yearsAgo: today.getFullYear() - year,
-          }
+          };
         }),
-    )
+    );
   }
 
-  async getStats(userId: string): Promise<{ totalFaces: number; peopleCount: number; byPerson: { name: string; faceCount: number; photoCount: number }[] }> {
+  async getStats(userId: string): Promise<{
+    totalFaces: number;
+    peopleCount: number;
+    byPerson: { name: string; faceCount: number; photoCount: number }[];
+  }> {
     const [totalFaces, peopleResult, allPersonData] = await Promise.all([
       this.prisma.face.count({
         where: { photo: { userId, deletedAt: null }, ignored: false },
@@ -530,17 +608,17 @@ export class FacesService implements OnModuleInit {
         select: { personName: true, photoId: true },
         distinct: ['personName', 'photoId'],
       }),
-    ])
+    ]);
 
-    const photoCounts = new Map<string, Set<string>>()
+    const photoCounts = new Map<string, Set<string>>();
     for (const f of allPersonData) {
-      if (!f.personName) continue
-      let set = photoCounts.get(f.personName)
+      if (!f.personName) continue;
+      let set = photoCounts.get(f.personName);
       if (!set) {
-        set = new Set()
-        photoCounts.set(f.personName, set)
+        set = new Set();
+        photoCounts.set(f.personName, set);
       }
-      set.add(f.photoId)
+      set.add(f.photoId);
     }
 
     const byPerson = peopleResult
@@ -550,9 +628,9 @@ export class FacesService implements OnModuleInit {
         faceCount: p._count.id,
         photoCount: photoCounts.get(p.personName!)?.size ?? 0,
       }))
-      .sort((a, b) => b.photoCount - a.photoCount)
+      .sort((a, b) => b.photoCount - a.photoCount);
 
-    return { totalFaces, peopleCount: byPerson.length, byPerson }
+    return { totalFaces, peopleCount: byPerson.length, byPerson };
   }
 
   async updateFace(
@@ -563,29 +641,32 @@ export class FacesService implements OnModuleInit {
     const face = await this.prisma.face.findUnique({
       where: { id: faceId },
       select: { id: true, photo: { select: { userId: true } } },
-    })
+    });
 
-    if (!face || face.photo.userId !== userId) return null
+    if (!face || face.photo.userId !== userId) return null;
 
     return this.prisma.face.update({
       where: { id: faceId },
       data: {
-        ...(data.personName !== undefined ? { personName: data.personName } : {}),
+        ...(data.personName !== undefined
+          ? { personName: data.personName }
+          : {}),
         ...(data.confirmed !== undefined ? { confirmed: data.confirmed } : {}),
         ...(data.ignored !== undefined ? { ignored: data.ignored } : {}),
       },
-    })
+    });
   }
 
   async deleteFace(faceId: string, userId: string) {
     const face = await this.prisma.face.findUnique({
       where: { id: faceId },
       select: { id: true, photo: { select: { userId: true } } },
-    })
+    });
 
-    if (!face || face.photo.userId !== userId) throw new Error('Face not found')
+    if (!face || face.photo.userId !== userId)
+      throw new Error('Face not found');
 
-    await this.prisma.face.delete({ where: { id: faceId } })
+    await this.prisma.face.delete({ where: { id: faceId } });
   }
 
   async confirmAllForPerson(
@@ -600,9 +681,9 @@ export class FacesService implements OnModuleInit {
         ignored: false,
       },
       data: { confirmed: true },
-    })
+    });
 
-    return result.count
+    return result.count;
   }
 
   async mergePeople(
@@ -616,18 +697,18 @@ export class FacesService implements OnModuleInit {
         personName: fromPerson,
       },
       data: { personName: toPerson },
-    })
+    });
 
-    return result.count
+    return result.count;
   }
 
   async getFacesByPhoto(photoId: string, userId: string) {
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
       select: { userId: true },
-    })
+    });
 
-    if (!photo || photo.userId !== userId) return []
+    if (!photo || photo.userId !== userId) return [];
 
     return this.prisma.face.findMany({
       where: { photoId, ignored: false },
@@ -640,14 +721,14 @@ export class FacesService implements OnModuleInit {
         personName: true,
         confirmed: true,
       },
-    })
+    });
   }
 
   private euclideanDistance(a: number[], b: number[]): number {
-    let sum = 0
+    let sum = 0;
     for (let i = 0; i < a.length && i < b.length; i++) {
-      sum += (a[i] - b[i]) ** 2
+      sum += (a[i] - b[i]) ** 2;
     }
-    return Math.sqrt(sum)
+    return Math.sqrt(sum);
   }
 }

@@ -3,9 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT, getBucketName } from '../common/s3.provider';
-import {
-  computePerceptualHash,
-} from '../common/image-analysis';
+import { computePerceptualHash } from '../common/image-analysis';
 import { PRESIGN_EXPIRY } from '../common/constants';
 
 @Injectable()
@@ -60,20 +58,23 @@ export class AnalysisService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const needsHash = allPhotos.filter(p => !p.perceptualHash);
+    const needsHash = allPhotos.filter((p) => !p.perceptualHash);
     for (const p of needsHash) {
       try {
         await this.analyzePhoto(userId, p.id);
-        p.perceptualHash = (await this.prisma.photo.findUnique({
-          where: { id: p.id },
-          select: { perceptualHash: true },
-        }))?.perceptualHash ?? null;
+        p.perceptualHash =
+          (
+            await this.prisma.photo.findUnique({
+              where: { id: p.id },
+              select: { perceptualHash: true },
+            })
+          )?.perceptualHash ?? null;
       } catch {
         this.logger.warn(`Skipping hash for photo ${p.id}`);
       }
     }
 
-    const photosWithHash = allPhotos.filter(p => p.perceptualHash);
+    const photosWithHash = allPhotos.filter((p) => p.perceptualHash);
 
     const presigned = await Promise.all(
       photosWithHash.map(async (p) => {

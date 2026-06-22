@@ -7,9 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as exifr from 'exifr';
 const req = createRequire(__filename);
-const { computePerceptualHash } = req(
-  '../common/image-analysis',
-);
+const { computePerceptualHash } = req('../common/image-analysis');
 const { THUMB_RESIZE, THUMB_QUALITY } = req('../common/constants');
 
 interface UploadWorkerInput {
@@ -77,41 +75,42 @@ async function run(input: UploadWorkerInput) {
       'CreateDate',
       'DateCreated',
       'ModifyDate',
-    ]
-    let photoDate: Date | null = null
-    let source = ''
-    const exifData = await exifr.parse(buffer, EXIF_DATE_TAGS).catch(() => null)
+    ];
+    let photoDate: Date | null = null;
+    const exifData = await exifr
+      .parse(buffer, EXIF_DATE_TAGS)
+      .catch(() => null);
     if (exifData) {
       for (const tag of EXIF_DATE_TAGS) {
-        const d = exifData[tag]
+        const d = exifData[tag];
         if (d) {
-          photoDate = d
-          source = `exif:${tag}`
-          break
+          photoDate = d;
+          source = `exif:${tag}`;
+          break;
         }
       }
     }
     if (photoDate) {
-      const y = photoDate.getFullYear()
+      const y = photoDate.getFullYear();
       if (y < 1900 || y > new Date().getFullYear() + 1) {
-        photoDate = null
-        source = ''
+        photoDate = null;
+        source = '';
       }
     }
     if (!photoDate) {
-      const name = file.filename
+      const name = file.filename;
       const patterns: RegExp[] = [
         /(\d{4})-?(\d{2})-?(\d{2})/,
         /(\d{4})_(\d{2})(\d{2})/,
         /IMG[_-](\d{4})(\d{2})(\d{2})/i,
         /VID[_-](\d{4})(\d{2})(\d{2})/i,
-      ]
+      ];
       for (const p of patterns) {
-        const m = name.match(p)
+        const m = name.match(p);
         if (m) {
-          const y = parseInt(m[1], 10)
-          const mo = parseInt(m[2], 10)
-          const d = parseInt(m[3], 10)
+          const y = parseInt(m[1], 10);
+          const mo = parseInt(m[2], 10);
+          const d = parseInt(m[3], 10);
           if (
             mo >= 1 &&
             mo <= 12 &&
@@ -120,16 +119,15 @@ async function run(input: UploadWorkerInput) {
             y >= 1900 &&
             y <= new Date().getFullYear() + 1
           ) {
-            photoDate = new Date(y, mo - 1, d, 12, 0, 0)
-            source = 'filename'
-            break
+            photoDate = new Date(y, mo - 1, d, 12, 0, 0);
+            source = 'filename';
+            break;
           }
         }
       }
     }
     if (!photoDate) {
-      photoDate = fs.statSync(file.path).mtime
-      source = 'file-mtime'
+      photoDate = fs.statSync(file.path).mtime;
     }
     const timestamp = photoDate.getTime();
     const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
