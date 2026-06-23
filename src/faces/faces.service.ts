@@ -3,9 +3,12 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { PrismaService } from '../prisma.service';
 import { S3_CLIENT } from '../common/s3.provider';
 import { spawn } from 'child_process';
+import { Worker } from 'worker_threads';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+import { FACE_DETECT_CONCURRENCY } from '../common/constants';
 
 const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api');
 const MATCH_THRESHOLD = 0.5;
@@ -315,16 +318,23 @@ export class FacesService implements OnModuleInit {
     let facesFound = 0;
     let failed = 0;
 
-    for (const photoId of photoIds) {
-      try {
-        const count = await this.detectAndSave(photoId, userId);
-        processed++;
-        facesFound += count;
-      } catch (err) {
-        this.logger.error(
-          `Failed to detect faces for ${photoId}: ${(err as Error).message}`,
-        );
-        failed++;
+    for (let i = 0; i < photoIds.length; i += FACE_DETECT_CONCURRENCY) {
+      const chunk = photoIds.slice(i, i + FACE_DETECT_CONCURRENCY);
+      const results = await Promise.allSettled(
+        chunk.map(async (photoId) => {
+          const count = await this.detectAndSave(photoId, userId);
+          return { photoId, count };
+        }),
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          processed++;
+          facesFound += result.value.count;
+        } else {
+          this.logger.error(`Failed to detect faces: ${result.reason}`);
+          failed++;
+        }
       }
     }
 
@@ -346,7 +356,30 @@ export class FacesService implements OnModuleInit {
     if (photoIds.length === 0)
       return { processed: 0, facesFound: 0, failed: 0 };
 
-    return this.detectBatch(userId, photoIds);
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(path.join(__dirname, 'detect-all.worker.js'), {
+        workerData: {
+          userId,
+          photoIds,
+          concurrency: FACE_DETECT_CONCURRENCY,
+        },
+      });
+      worker.on('message', (msg) => {
+        if (msg.type === 'done') {
+          resolve({
+            processed: msg.processed,
+            facesFound: msg.facesFound,
+            failed: msg.failed,
+          });
+        } else if (msg.type === 'error') {
+          reject(new Error(msg.message));
+        }
+      });
+      worker.on('error', reject);
+      worker.on('exit', (code) => {
+        if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+      });
+    });
   }
 
   async getPeople(userId: string): Promise<
@@ -700,6 +733,129 @@ export class FacesService implements OnModuleInit {
     });
 
     return result.count;
+  }
+
+  async findMoreFaces(
+    userId: string,
+    personName: string,
+  ): Promise<
+    { faceId: string; photoId: string; photoUri: string; distance: number }[]
+  > {
+    const confirmedFaces = await this.prisma.face.findMany({
+      where: {
+        photo: { userId, deletedAt: null },
+        personName,
+        confirmed: true,
+        ignored: false,
+      },
+      select: { encoding: true },
+      take: 20,
+    });
+
+    if (confirmedFaces.length === 0) return [];
+
+    const confirmedEncodings = confirmedFaces.map(
+      (f) => f.encoding as number[],
+    );
+
+    const BATCH_SIZE = 500;
+    let skip = 0;
+    let hasMore = true;
+
+    interface ScoredFace {
+      id: string;
+      photoId: string;
+      photo: { thumbS3Key: string | null; s3Key: string };
+      distance: number;
+    }
+    const allMatches: ScoredFace[] = [];
+
+    const bucket =
+      process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
+
+    while (hasMore) {
+      const batch = await this.prisma.face.findMany({
+        where: {
+          photo: { userId, deletedAt: null },
+          confirmed: false,
+          ignored: false,
+          personName: null,
+        },
+        select: {
+          id: true,
+          photoId: true,
+          encoding: true,
+          photo: { select: { thumbS3Key: true, s3Key: true } },
+        },
+        skip,
+        take: BATCH_SIZE,
+      });
+
+      if (batch.length === 0) {
+        hasMore = false;
+        break;
+      }
+      skip += batch.length;
+
+      const unconfirmedEncodings = batch.map((f) => f.encoding as number[]);
+
+      const matches = await this.runFindMoreWorker(
+        confirmedEncodings,
+        unconfirmedEncodings,
+        MATCH_THRESHOLD,
+      );
+
+      for (const m of matches) {
+        const face = batch[m.index];
+        allMatches.push({
+          id: face.id,
+          photoId: face.photoId,
+          photo: face.photo,
+          distance: m.distance,
+        });
+      }
+    }
+
+    allMatches.sort((a, b) => a.distance - b.distance);
+
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+
+    return Promise.all(
+      allMatches.map(async (m) => {
+        const thumbKey = m.photo.thumbS3Key || m.photo.s3Key;
+        const uri = await getSignedUrl(
+          this.s3,
+          new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
+          { expiresIn: 604800 },
+        );
+        return {
+          faceId: m.id,
+          photoId: m.photoId,
+          photoUri: uri,
+          distance: m.distance,
+        };
+      }),
+    );
+  }
+
+  private runFindMoreWorker(
+    confirmedEncodings: number[][],
+    unconfirmedEncodings: number[][],
+    threshold: number,
+  ): Promise<{ index: number; distance: number }[]> {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(path.join(__dirname, 'find-more.worker.js'), {
+        workerData: { confirmedEncodings, unconfirmedEncodings, threshold },
+      });
+      worker.on('message', (msg) => {
+        if (msg.error) reject(new Error(msg.error));
+        else resolve(msg);
+      });
+      worker.on('error', reject);
+      worker.on('exit', (code) => {
+        if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+      });
+    });
   }
 
   async getFacesByPhoto(photoId: string, userId: string) {

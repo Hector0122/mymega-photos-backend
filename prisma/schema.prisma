@@ -97,4 +97,6 @@ model Face {
   @@index([photoId])
   @@index([personName])
   @@index([confirmed, ignored])
+  @@index([confirmed, ignored, personName])
+  @@index([createdAt])
 }

@@ -116,6 +116,19 @@ export class FacesController {
     return this.facesService.getStats(user.id);
   }
 
+  @Get('find-more')
+  async findMoreFaces(
+    @CurrentUser() user: { id: string },
+    @Query('person') person: string,
+  ) {
+    if (!person || typeof person !== 'string')
+      throw new BadRequestException('person query param is required');
+    const sanitized = sanitize(person, 50);
+    if (!sanitized)
+      throw new BadRequestException('person is empty after sanitization');
+    return this.facesService.findMoreFaces(user.id, sanitized);
+  }
+
   @Get('photo/:photoId')
   async getFacesByPhoto(
     @CurrentUser() user: { id: string },
