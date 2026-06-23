@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Photo-sharing app: React Native frontend (Android) + NestJS backend + Supabase (PostgreSQL) + Cloudflare R2 (S3-compatible storage). Server-side thumbnail generation via `sharp`, AI analysis (blur + perceptual hash), push notifications (Firebase), and email export via Mailgun.
+Photo-sharing app: React Native frontend (Android) + NestJS backend + Neon (PostgreSQL) + Cloudflare R2 (S3-compatible storage). Server-side thumbnail generation via `sharp`, AI analysis (blur + perceptual hash), push notifications (Firebase), and email export via Mailgun.
 
 ## Project structure
 
@@ -111,7 +111,7 @@ PersonalProject/
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | ✅ | — | Supabase PostgreSQL |
+| `DATABASE_URL` | ✅ | — | Neon PostgreSQL |
 | `JWT_SECRET` | ✅ | — | No fallback — app crashes if missing |
 | `R2_ACCOUNT_ID` | ✅ | — | Cloudflare R2 account |
 | `R2_ACCESS_KEY_ID` | ✅ | — | R2 access key |

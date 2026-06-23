@@ -1,12 +1,12 @@
 # Vaulta — Backend
 
-NestJS 11 API for photo management. Stores photos in Cloudflare R2 (S3-compatible), generates thumbnails via `sharp`, manages metadata in PostgreSQL (Supabase), with push notifications (Firebase) and email export (Mailgun).
+NestJS 11 API for photo management. Stores photos in Cloudflare R2 (S3-compatible), generates thumbnails via `sharp`, manages metadata in PostgreSQL (Neon), with push notifications (Firebase) and email export (Mailgun).
 
 ## Tech stack
 
 - **Runtime:** Node.js >=20
 - **Framework:** NestJS 11 (TypeScript, strict mode)
-- **Database:** PostgreSQL via Prisma ORM (Supabase)
+- **Database:** PostgreSQL via Prisma ORM (Neon)
 - **Storage:** Cloudflare R2 (S3-compatible)
 - **Auth:** JWT + Refresh token rotation
 - **AI:** Sharp (thumbnails), custom blur/hash analysis
