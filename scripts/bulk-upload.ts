@@ -2,25 +2,21 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, extname, resolve, basename } from 'path';
 import { performance } from 'perf_hooks';
 import cliProgress from 'cli-progress';
+import { randomUUID } from 'crypto';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import sharp from 'sharp';
+import * as exifr from 'exifr';
+import { computePerceptualHash } from '../src/common/image-analysis';
+import { THUMB_RESIZE, THUMB_QUALITY } from '../src/common/constants';
 
 const ALLOWED_EXTENSIONS = new Set([
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.heic',
-  '.heif',
-  '.mp4',
-  '.mov',
-  '.avi',
-  '.mkv',
-  '.webm',
+  '.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif',
+  '.mp4', '.mov', '.avi', '.mkv', '.webm',
 ]);
-const BATCH_SIZE = 10;
-const BACKEND_URL =
-  process.env.BACKEND_URL ||
-  process.env.RAILWAY_PUBLIC_URL ||
-  'http://localhost:3000';
+
+const EXIF_DATE_TAGS = ['DateTimeOriginal', 'CreateDate', 'DateCreated', 'ModifyDate'];
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']);
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
 
 type Result = {
   filepath: string;
@@ -32,204 +28,42 @@ type Result = {
 
 function getMimeType(ext: string): string {
   const map: Record<string, string> = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.webp': 'image/webp',
-    '.heic': 'image/heic',
-    '.heif': 'image/heif',
-    '.mp4': 'video/mp4',
-    '.mov': 'video/quicktime',
-    '.avi': 'video/x-msvideo',
-    '.mkv': 'video/x-matroska',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png', '.webp': 'image/webp',
+    '.heic': 'image/heic', '.heif': 'image/heif',
+    '.mp4': 'video/mp4', '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska',
     '.webm': 'video/webm',
   };
   return map[ext] || 'application/octet-stream';
 }
 
 function escapeCsv(val: string): string {
-  if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+  if (val.includes(',') || val.includes('"') || val.includes('\n'))
     return `"${val.replace(/"/g, '""')}"`;
-  }
   return val;
-}
-
-interface AuthResult {
-  token: string;
-  refreshToken?: string;
-  user: { id: string; email: string; name: string };
-}
-
-async function authenticate(): Promise<string> {
-  const token = process.env.BULK_TOKEN;
-  if (token) return token;
-
-  const email = process.env.BULK_EMAIL;
-  const password = process.env.BULK_PASSWORD;
-
-  if (!email || !password) {
-    console.error(
-      'Se necesita autenticación.\n' +
-        'Opciones:\n' +
-        '  1. Exporta BULK_TOKEN=<jwt>\n' +
-        '  2. Exporta BULK_EMAIL + BULK_PASSWORD (se logea automático)\n' +
-        '  3. Agrélos al .env del backend',
-    );
-    process.exit(1);
-  }
-
-  console.log(`Iniciando sesión como ${email}...`);
-  const res = await fetch(`${BACKEND_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`Error de autenticación (${res.status}): ${text}`);
-    process.exit(1);
-  }
-  const data = (await res.json()) as AuthResult;
-  console.log(`Sesión iniciada: ${data.user.name}`);
-  return data.token;
 }
 
 function scanFiles(dir: string): string[] {
   const results: string[] = [];
   const queue = [resolve(dir)];
-
   while (queue.length > 0) {
     const current = queue.pop()!;
     let entries: string[];
-    try {
-      entries = readdirSync(current);
-    } catch {
-      continue;
-    }
+    try { entries = readdirSync(current); } catch { continue; }
     for (const entry of entries) {
       const fullPath = join(current, entry);
       let stat: ReturnType<typeof statSync>;
-      try {
-        stat = statSync(fullPath);
-      } catch {
-        continue;
-      }
+      try { stat = statSync(fullPath); } catch { continue; }
       if (stat.isDirectory()) {
         queue.push(fullPath);
       } else if (stat.isFile()) {
         const ext = extname(entry).toLowerCase();
-        if (ALLOWED_EXTENSIONS.has(ext)) {
-          results.push(fullPath);
-        }
+        if (ALLOWED_EXTENSIONS.has(ext)) results.push(fullPath);
       }
     }
   }
-
   return results;
-}
-
-async function computePerceptualHash(filePath: string): Promise<string | null> {
-  try {
-    const sharp = (await import('sharp')).default;
-    const buffer = readFileSync(filePath);
-    const { data: hashData } = await sharp(buffer)
-      .resize(8, 8, { fit: 'cover' })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const avg = hashData.reduce((a, b) => a + b, 0) / hashData.length;
-    const hashBin = Array.from(hashData)
-      .map((v) => (v > avg ? '1' : '0'))
-      .join('');
-    return BigInt('0b' + hashBin)
-      .toString(16)
-      .padStart(16, '0');
-  } catch {
-    return null;
-  }
-}
-
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 2000;
-
-async function uploadBatch(token: string, files: string[]): Promise<Result[]> {
-  const fileInfos: { path: string; size: number }[] = [];
-  const buffers: Buffer[] = [];
-  for (const filePath of files) {
-    const ext = extname(filePath).toLowerCase();
-    const buffer = readFileSync(filePath);
-    buffers.push(buffer);
-    fileInfos.push({ path: filePath, size: buffer.length });
-  }
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const form = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      const blob = new Blob([new Uint8Array(buffers[i])], {
-        type: getMimeType(extname(files[i]).toLowerCase()),
-      });
-      form.append('files', blob, basename(files[i]));
-    }
-
-    try {
-      const res = await fetch(`${BACKEND_URL}/photos/upload-batch`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const ok = res.ok;
-      const text = ok ? '' : await res.text();
-      if (ok) {
-        return fileInfos.map((f) => ({
-          filepath: f.path,
-          filename: basename(f.path),
-          sizeBytes: f.size,
-          status: 'subido' as const,
-          error: '',
-        }));
-      }
-      const errMsg = `HTTP ${res.status}: ${text}`;
-      if (attempt < MAX_RETRIES && (res.status >= 500 || res.status === 429)) {
-        const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
-        console.error(
-          `  ⚠️  Lote falló con ${res.status}, reintentando en ${delay / 1000}s (intento ${attempt + 1}/${MAX_RETRIES})...`,
-        );
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
-      }
-      return fileInfos.map((f) => ({
-        filepath: f.path,
-        filename: basename(f.path),
-        sizeBytes: f.size,
-        status: 'fallido' as const,
-        error: errMsg,
-      }));
-    } catch (err: any) {
-      if (attempt < MAX_RETRIES) {
-        const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
-        console.error(
-          `  ⚠️  Error de red: ${err.message} — reintentando en ${delay / 1000}s (intento ${attempt + 1}/${MAX_RETRIES})...`,
-        );
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
-      }
-      return fileInfos.map((f) => ({
-        filepath: f.path,
-        filename: basename(f.path),
-        sizeBytes: f.size,
-        status: 'error' as const,
-        error: err.message,
-      }));
-    }
-  }
-
-  return fileInfos.map((f) => ({
-    filepath: f.path,
-    filename: basename(f.path),
-    sizeBytes: f.size,
-    status: 'error' as const,
-    error: 'Max retries exceeded',
-  }));
 }
 
 function formatBytes(bytes: number): string {
@@ -239,187 +73,275 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-async function main() {
-  const dirPath = process.argv[2];
-  if (!dirPath) {
-    console.error('Uso: npm run subir-masivo -- /ruta/al/disco');
-    console.error('  --no-dedup   Saltar detección de duplicados');
-    process.exit(1);
-  }
-
-  const skipDedup = process.argv.includes('--no-dedup');
-  const startTime = performance.now();
-
-  console.log(`📂 Escaneando ${dirPath}...`);
-  const allFiles = scanFiles(dirPath);
-  const totalBytes = allFiles.reduce((sum, f) => {
-    try {
-      return sum + statSync(f).size;
-    } catch {
-      return sum;
-    }
-  }, 0);
-  console.log(
-    `Encontrados ${allFiles.length} archivos (${formatBytes(totalBytes)})`,
-  );
-
-  const token = await authenticate();
-
-  const results: Result[] = [];
-
-  if (!skipDedup) {
-    console.log(
-      '🔍 Cargando hashes existentes para detección de duplicados...',
-    );
-    const { PrismaClient } = await import('@prisma/client');
-    const { PrismaPg } = await import('@prisma/adapter-pg');
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      console.error(
-        'DATABASE_URL es requerida para detección de duplicados. Usa --no-dedup para saltar.',
-      );
-      process.exit(1);
-    }
-    const adapter = new PrismaPg(
-      { connectionString },
-      { schema: process.env.DATABASE_SCHEMA || 'public' },
-    );
-    const prisma = new PrismaClient({ adapter });
-
-    const existing = await prisma.photo.findMany({
-      where: { deletedAt: null, perceptualHash: { not: null } },
-      select: { perceptualHash: true },
-    });
-    const hashSet = new Set(existing.map((p) => p.perceptualHash));
-    await prisma.$disconnect();
-    console.log(`Biblioteca: ${hashSet.size} hashes únicos`);
-
-    console.log('🔎 Calculando perceptual hash de cada archivo...');
-    const dedupBar = new cliProgress.SingleBar({
-      format: 'Hash: [{bar}] {percentage}% | {value}/{total} | {current}',
-      barCompleteChar: '█',
-      barIncompleteChar: '░',
-      clearOnComplete: true,
-    });
-    dedupBar.start(allFiles.length, 0, { current: '' });
-
-    for (let i = 0; i < allFiles.length; i++) {
-      const file = allFiles[i];
-      dedupBar.update(i, { current: basename(file) });
-      const hash = await computePerceptualHash(file);
-      if (hash && hashSet.has(hash)) {
-        results.push({
-          filepath: file,
-          filename: basename(file),
-          sizeBytes: statSync(file).size,
-          status: 'duplicado',
-          error: '',
-        });
-        continue;
-      }
-    }
-    dedupBar.stop();
-    console.log(
-      `Duplicados: ${results.filter((r) => r.status === 'duplicado').length}`,
-    );
-  }
-
-  const toUpload = skipDedup
-    ? allFiles
-    : allFiles.filter((f) => !results.some((r) => r.filepath === f));
-
-  if (toUpload.length === 0) {
-    const csvPath = writeCsv(results, dirPath);
-    console.log(`✅ No hay archivos nuevos para subir. CSV: ${csvPath}`);
-    return;
-  }
-
-  console.log(
-    `\n📤 Subiendo ${toUpload.length} archivo(s) en lotes de ${BATCH_SIZE}...`,
-  );
-
-  const uploadBar = new cliProgress.SingleBar({
-    format:
-      'Subida: [{bar}] {percentage}% | {value}/{total} archivos | {speed}',
-    barCompleteChar: '█',
-    barIncompleteChar: '░',
-  });
-  uploadBar.start(toUpload.length, 0, { speed: '' });
-
-  const lastUpdate = { time: performance.now(), count: 0 };
-
-  for (let i = 0; i < toUpload.length; i += BATCH_SIZE) {
-    const batch = toUpload.slice(i, i + BATCH_SIZE);
-    const batchResults = await uploadBatch(token, batch);
-    results.push(...batchResults);
-
-    const done = results.filter(
-      (r) =>
-        r.status === 'subido' || r.status === 'fallido' || r.status === 'error',
-    ).length;
-
-    const now = performance.now();
-    const elapsed = (now - lastUpdate.time) / 1000;
-    if (elapsed > 2) {
-      const speed = ((done - lastUpdate.count) / elapsed) * BATCH_SIZE;
-      const speedStr = `${formatBytes(speed * 1024 * 1024)}/s`;
-      uploadBar.update(done, { speed: speedStr });
-      lastUpdate.time = now;
-      lastUpdate.count = done;
-    } else {
-      uploadBar.update(done);
-    }
-  }
-
-  uploadBar.stop();
-
-  const uploaded = results.filter((r) => r.status === 'subido').length;
-  const failed = results.filter(
-    (r) => r.status === 'fallido' || r.status === 'error',
-  ).length;
-  const duplicates = results.filter((r) => r.status === 'duplicado').length;
-  const uploadedBytes = results
-    .filter((r) => r.status === 'subido')
-    .reduce((s, r) => s + r.sizeBytes, 0);
-
-  const csvPath = writeCsv(results, dirPath);
-
-  const elapsed = ((performance.now() - startTime) / 1000 / 60).toFixed(1);
-  console.log(`\n${'='.repeat(40)}`);
-  console.log(`📊  REPORTE FINAL`);
-  console.log(`${'='.repeat(40)}`);
-  console.log(`  Subidos:     ${uploaded}`);
-  console.log(`  Fallidos:    ${failed}`);
-  console.log(`  Duplicados:  ${duplicates}`);
-  console.log(`  Total datos: ${formatBytes(uploadedBytes)}`);
-  console.log(`  Tiempo:      ${elapsed} min`);
-  console.log(`  CSV:         ${csvPath}`);
-  console.log(`${'='.repeat(40)}`);
-}
-
 function writeCsv(results: Result[], dirPath: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const dirName = basename(resolve(dirPath));
   const csvPath = `bulk-upload_${dirName}_${timestamp}.csv`;
-
   let csv = 'filepath,filename,size_bytes,status,error\n';
-  for (const r of results) {
+  for (const r of results)
     csv += `${escapeCsv(r.filepath)},${escapeCsv(r.filename)},${r.sizeBytes},${r.status},${escapeCsv(r.error)}\n`;
-  }
-
-  const uploaded = results.filter((r) => r.status === 'subido').length;
-  const failed = results.filter(
-    (r) => r.status === 'fallido' || r.status === 'error',
-  ).length;
-  const duplicates = results.filter((r) => r.status === 'duplicado').length;
+  const uploaded = results.filter(r => r.status === 'subido').length;
+  const failed = results.filter(r => r.status === 'fallido' || r.status === 'error').length;
+  const duplicates = results.filter(r => r.status === 'duplicado').length;
   csv += `\n# Resumen: ${uploaded} subidos, ${failed} fallidos, ${duplicates} duplicados\n`;
   csv += `# Fecha: ${new Date().toISOString()}\n`;
-
   writeFileSync(csvPath, csv, 'utf-8');
   return csvPath;
 }
 
-main().catch((err) => {
-  console.error('Error fatal:', err.message);
-  process.exit(1);
-});
+async function getPhotoDate(filePath: string, buffer: Buffer): Promise<Date> {
+  let photoDate: Date | null = null
+  const exifData = await exifr.parse(buffer, EXIF_DATE_TAGS).catch(() => null)
+  if (exifData) {
+    for (const tag of EXIF_DATE_TAGS) {
+      const d = exifData[tag]
+      if (d) { photoDate = d; break }
+    }
+  }
+  if (photoDate) {
+    const y = photoDate.getFullYear()
+    if (y < 1900 || y > new Date().getFullYear() + 1) photoDate = null
+  }
+  if (!photoDate) {
+    const name = basename(filePath)
+    const patterns: RegExp[] = [
+      /(\d{4})-?(\d{2})-?(\d{2})/,
+      /(\d{4})_(\d{2})(\d{2})/,
+      /IMG[_-](\d{4})(\d{2})(\d{2})/i,
+      /VID[_-](\d{4})(\d{2})(\d{2})/i,
+    ]
+    for (const p of patterns) {
+      const m = name.match(p)
+      if (m) {
+        const y = parseInt(m[1], 10)
+        const mo = parseInt(m[2], 10)
+        const d = parseInt(m[3], 10)
+        if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= new Date().getFullYear() + 1)
+          { photoDate = new Date(y, mo - 1, d, 12, 0, 0); break }
+      }
+    }
+  }
+  if (!photoDate) photoDate = statSync(filePath).mtime
+  return photoDate
+}
+
+async function main() {
+  const dirPath = process.argv[2]
+  if (!dirPath) {
+    console.error('Uso: npm run subir-masivo -- /ruta/al/disco')
+    console.error('  --no-dedup   Saltar detección de duplicados')
+    process.exit(1)
+  }
+
+  const skipDedup = process.argv.includes('--no-dedup')
+  const startTime = performance.now()
+
+  const r2AccountId = process.env.R2_ACCOUNT_ID
+  const r2AccessKey = process.env.R2_ACCESS_KEY_ID
+  const r2SecretKey = process.env.R2_SECRET_ACCESS_KEY
+  const r2Bucket = process.env.R2_BUCKET_NAME
+  const r2PublicUrl = process.env.R2_PUBLIC_URL
+  if (!r2AccountId || !r2AccessKey || !r2SecretKey || !r2Bucket) {
+    console.error('Error: Faltan variables de entorno R2_* (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME)')
+    process.exit(1)
+  }
+
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl) {
+    console.error('Error: DATABASE_URL es requerida')
+    process.exit(1)
+  }
+
+  const email = process.env.BULK_EMAIL
+  if (!email) {
+    console.error('Error: BULK_EMAIL es requerido (correo del usuario dueño de las fotos)')
+    process.exit(1)
+  }
+
+  console.log(`📂 Escaneando ${dirPath}...`)
+  const allFiles = scanFiles(dirPath)
+  const totalBytes = allFiles.reduce((sum, f) => {
+    try { return sum + statSync(f).size } catch { return sum }
+  }, 0)
+  console.log(`Encontrados ${allFiles.length} archivos (${formatBytes(totalBytes)})`)
+
+  const { Pool } = await import('pg')
+  const pool = new Pool({ connectionString: dbUrl })
+
+  const userResult = await pool.query('SELECT id FROM "User" WHERE email = $1', [email])
+  if (userResult.rows.length === 0) {
+    console.error(`Error: No se encontró usuario con email ${email}`)
+    await pool.end()
+    process.exit(1)
+  }
+  const userId = userResult.rows[0].id
+  console.log(`Usuario: ${email} (${userId})`)
+
+  const r2Endpoint = `https://${r2AccountId}.r2.cloudflarestorage.com`
+  const s3 = new S3Client({
+    region: 'auto',
+    endpoint: r2Endpoint,
+    forcePathStyle: true,
+    credentials: { accessKeyId: r2AccessKey, secretAccessKey: r2SecretKey },
+    requestHandler: { requestTimeout: 300_000 },
+  })
+
+  const results: Result[] = []
+
+  if (!skipDedup) {
+    console.log('🔍 Cargando hashes existentes para detección de duplicados...')
+    const hashResult = await pool.query(
+      'SELECT "perceptualHash" FROM "Photo" WHERE "deletedAt" IS NULL AND "perceptualHash" IS NOT NULL'
+    )
+    const hashSet = new Set(hashResult.rows.map(r => r.perceptualHash))
+    console.log(`Biblioteca: ${hashSet.size} hashes únicos`)
+
+    console.log('🔎 Calculando perceptual hash de cada archivo...')
+    const dedupBar = new cliProgress.SingleBar({
+      format: 'Hash: [{bar}] {percentage}% | {value}/{total} | {current}',
+      barCompleteChar: '█', barIncompleteChar: '░', clearOnComplete: true,
+    })
+    dedupBar.start(allFiles.length, 0, { current: '' })
+
+    for (let i = 0; i < allFiles.length; i++) {
+      const file = allFiles[i]
+      dedupBar.update(i, { current: basename(file) })
+      const ext = extname(file).toLowerCase()
+      if (VIDEO_EXTS.has(ext)) continue
+      try {
+        const buffer = readFileSync(file)
+        const hash = await computePerceptualHash(buffer)
+        if (hash && hashSet.has(hash)) {
+          results.push({ filepath: file, filename: basename(file), sizeBytes: statSync(file).size, status: 'duplicado', error: '' })
+        }
+      } catch { /* continue */ }
+    }
+    dedupBar.stop()
+    console.log(`Duplicados: ${results.filter(r => r.status === 'duplicado').length}`)
+  }
+
+  let toUpload = skipDedup
+    ? allFiles
+    : allFiles.filter(f => !results.some(r => r.filepath === f))
+
+  if (toUpload.length === 0) {
+    const csvPath = writeCsv(results, dirPath)
+    console.log(`✅ No hay archivos nuevos para subir. CSV: ${csvPath}`)
+    await pool.end()
+    return
+  }
+
+  console.log(`\n📤 Subiendo ${toUpload.length} archivo(s) directamente a R2...`)
+
+  const uploadBar = new cliProgress.SingleBar({
+    format: 'Subida: [{bar}] {percentage}% | {value}/{total} archivos | {current}',
+    barCompleteChar: '█', barIncompleteChar: '░',
+  })
+  uploadBar.start(toUpload.length, 0, { current: '' })
+
+  const CONCURRENCY = 15
+  let uploadedCount = 0
+
+  async function uploadOne(filePath: string): Promise<Result> {
+    const filename = basename(filePath).replace(/[ ()]/g, '_')
+    const ext = extname(filePath).toLowerCase()
+    const mimeType = getMimeType(ext)
+    const isVideo = VIDEO_EXTS.has(ext)
+    const isImage = IMAGE_EXTS.has(ext)
+
+    try {
+      const buffer = readFileSync(filePath)
+      const photoDate = await getPhotoDate(filePath, buffer)
+      const timestamp = photoDate.getTime()
+      const fullKey = `uploads/${userId}/${timestamp}-${filename}`
+      const encodedKey = fullKey.split('/').map(encodeURIComponent).join('/')
+      const publicUrl = r2PublicUrl
+        ? `${r2PublicUrl}/${encodedKey}`
+        : `${r2Endpoint}/${r2Bucket}/${encodedKey}`
+
+      let thumbS3Key: string | null = null
+      let perceptualHash: string | null = null
+      let existsInR2 = false
+
+      try {
+        await s3.send(new HeadObjectCommand({ Bucket: r2Bucket, Key: fullKey }))
+        existsInR2 = true
+      } catch { /* not in R2 yet */ }
+
+      if (!existsInR2) {
+        await s3.send(new PutObjectCommand({
+          Bucket: r2Bucket, Key: fullKey, Body: buffer, ContentType: mimeType,
+        }))
+
+        if (isImage) {
+          try {
+            const thumbKey = `thumbnails/${userId}/${timestamp}-${filename}`
+            const thumbBuffer = await sharp(buffer)
+              .resize(THUMB_RESIZE)
+              .jpeg({ quality: THUMB_QUALITY })
+              .toBuffer()
+            await s3.send(new PutObjectCommand({
+              Bucket: r2Bucket, Key: thumbKey, Body: thumbBuffer, ContentType: 'image/jpeg',
+            }))
+            thumbS3Key = thumbKey
+          } catch {}
+          try {
+            perceptualHash = await computePerceptualHash(buffer)
+          } catch {}
+        }
+      }
+
+      await pool.query(
+        `INSERT INTO "Photo" ("id", "s3Key", "thumbS3Key", "url", "filename", "mimeType", "size", "perceptualHash", "createdAt", "userId")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT ("s3Key") DO NOTHING`,
+        [randomUUID(), fullKey, thumbS3Key, publicUrl, filename, mimeType, buffer.length, perceptualHash, photoDate, userId]
+      )
+
+      return { filepath: filePath, filename, sizeBytes: buffer.length, status: existsInR2 ? 'subido' : 'subido', error: '' }
+    } catch (err: any) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      return { filepath: filePath, filename, sizeBytes: statSync(filePath).size, status: 'fallido', error: errMsg }
+    }
+  }
+
+  for (let i = 0; i < toUpload.length; i += CONCURRENCY) {
+    const chunk = toUpload.slice(i, i + CONCURRENCY)
+    const chunkResults = await Promise.allSettled(chunk.map(uploadOne))
+    for (const r of chunkResults) {
+      if (r.status === 'fulfilled') {
+        results.push(r.value)
+      } else {
+        results.push({ filepath: '', filename: '', sizeBytes: 0, status: 'error', error: r.reason?.message || 'Unknown' })
+      }
+    }
+    uploadedCount += chunk.length
+    uploadBar.update(uploadedCount, { current: '' })
+  }
+
+  uploadBar.stop()
+  await pool.end()
+
+  const uploaded = results.filter(r => r.status === 'subido').length
+  const failed = results.filter(r => r.status === 'fallido' || r.status === 'error').length
+  const duplicates = results.filter(r => r.status === 'duplicado').length
+  const uploadedBytes = results.filter(r => r.status === 'subido').reduce((s, r) => s + r.sizeBytes, 0)
+
+  const csvPath = writeCsv(results, dirPath)
+  const elapsed = ((performance.now() - startTime) / 1000 / 60).toFixed(1)
+  console.log(`\n${'='.repeat(40)}`)
+  console.log(`📊  REPORTE FINAL`)
+  console.log(`${'='.repeat(40)}`)
+  console.log(`  Subidos:     ${uploaded}`)
+  console.log(`  Fallidos:    ${failed}`)
+  console.log(`  Duplicados:  ${duplicates}`)
+  console.log(`  Total datos: ${formatBytes(uploadedBytes)}`)
+  console.log(`  Tiempo:      ${elapsed} min`)
+  console.log(`  CSV:         ${csvPath}`)
+  console.log(`${'='.repeat(40)}`)
+}
+
+main().catch(err => {
+  console.error('Error fatal:', err.message)
+  process.exit(1)
+})
