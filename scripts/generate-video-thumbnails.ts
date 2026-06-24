@@ -1,10 +1,10 @@
-import { readFileSync, writeFileSync, mkdtempSync, unlinkSync, rmSync, existsSync } from 'fs'
-import { join, extname, basename as pathBasename, dirname as pathDirname } from 'path'
+import { readFileSync, mkdtempSync, unlinkSync, rmSync, existsSync } from 'fs'
+import { join, resolve, basename as pathBasename, dirname as pathDirname } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { config } from 'dotenv'
-import { resolve } from 'path'
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Pool } from 'pg'
 import cliProgress from 'cli-progress'
 import { THUMB_RESIZE, THUMB_QUALITY } from '../src/common/constants'
@@ -91,8 +91,7 @@ async function main() {
   let fail = 0
 
   async function processVideo(row: { id: string; s3Key: string; filename: string }) {
-    const videoPath = join(tempDir, randomUUID() + extname(row.s3Key))
-    const thumbPath = videoPath + '-thumb.jpg'
+    const thumbPath = join(tempDir, randomUUID() + '-thumb.jpg')
     const thumbKey = row.s3Key.replace('uploads/', 'thumbnails/').replace(/\.[^.]+$/, '.jpg')
     const encodedKey = thumbKey.split('/').map(encodeURIComponent).join('/')
     const thumbUrl = r2PublicUrl
@@ -100,34 +99,30 @@ async function main() {
       : `https://${r2AccountId}.r2.cloudflarestorage.com/${r2Bucket}/${encodedKey}`
 
     try {
-      // 1. Download video from R2
-      const obj = await s3.send(new GetObjectCommand({
-        Bucket: r2Bucket!, Key: row.s3Key,
-      }))
-      const videoBuf = Buffer.from(await obj.Body!.transformToByteArray())
-      writeFileSync(videoPath, videoBuf)
+      const presignedUrl = await getSignedUrl(
+        s3,
+        new GetObjectCommand({ Bucket: r2Bucket!, Key: row.s3Key }),
+        { expiresIn: 7200 },
+      )
 
-      // 2. Generate thumbnail with ffmpeg
       await new Promise<void>((resolve_, reject) => {
-        ffmpeg(videoPath)
+        ffmpeg(presignedUrl)
+          .seekInput(1)
           .on('end', () => resolve_())
           .on('error', reject)
           .screenshots({
             count: 1,
-            timemarks: ['1'],
             filename: pathBasename(thumbPath),
             folder: pathDirname(thumbPath),
             size: `${THUMB_RESIZE}x?`,
           })
       })
 
-      // 3. Upload thumbnail to R2
       const thumbBuf = readFileSync(thumbPath)
       await s3.send(new PutObjectCommand({
         Bucket: r2Bucket!, Key: thumbKey, Body: thumbBuf, ContentType: 'image/jpeg',
       }))
 
-      // 4. Update DB
       await pool.query(
         'UPDATE "Photo" SET "thumbS3Key" = $1, "url" = $2 WHERE id = $3',
         [thumbKey, thumbUrl + '?v=' + Date.now(), row.id]
@@ -138,7 +133,6 @@ async function main() {
       fail++
       if (fail <= 5) console.warn(`\n  ⚠️ Error: ${row.filename} — ${err.message}`)
     } finally {
-      try { unlinkSync(videoPath) } catch { /* ignore */ }
       try { unlinkSync(thumbPath) } catch { /* ignore */ }
       progress.increment({ ok, fail })
     }

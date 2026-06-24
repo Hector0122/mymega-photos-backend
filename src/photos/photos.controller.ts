@@ -152,8 +152,16 @@ export class PhotosController {
   }
 
   @Get('photos/trash')
-  async getTrash(@CurrentUser() user: { id: string }) {
-    return this.photosService.getTrash(user.id);
+  async getTrash(
+    @CurrentUser() user: { id: string },
+    @Query('pageToken') pageToken?: string,
+    @Query('maxKeys') maxKeys?: string,
+  ) {
+    return this.photosService.getTrash(
+      user.id,
+      pageToken,
+      maxKeys ? parseInt(maxKeys, 10) : 50,
+    );
   }
 
   @Get('photos/duplicates')
@@ -194,8 +202,14 @@ export class PhotosController {
     } else {
       throw new UnauthorizedException();
     }
-    const { stream, contentType, contentLength } =
-      await this.photosService.getPhotoStream(userId, id);
+    const rangeHeader = req.headers?.range as string | undefined;
+    const { stream, contentType, contentLength, contentRange, isPartial } =
+      await this.photosService.getPhotoStream(userId, id, rangeHeader);
+
+    if (isPartial && contentRange) {
+      res.status(206);
+      res.setHeader('Content-Range', contentRange);
+    }
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Length', contentLength);
     res.setHeader('Accept-Ranges', 'bytes');

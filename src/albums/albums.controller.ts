@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -75,8 +76,15 @@ export class AlbumsController {
   async getPhotos(
     @CurrentUser() user: { id: string },
     @Param('id') id: string,
+    @Query('pageToken') pageToken?: string,
+    @Query('maxKeys') maxKeys?: string,
   ) {
-    return this.albums.getPhotos(user.id, id);
+    return this.albums.getPhotos(
+      user.id,
+      id,
+      pageToken,
+      maxKeys ? parseInt(maxKeys, 10) : 50,
+    );
   }
 
   @Post(':id/photos')

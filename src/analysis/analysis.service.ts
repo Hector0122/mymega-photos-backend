@@ -43,8 +43,13 @@ export class AnalysisService {
   async getDuplicates(userId: string) {
     const bucket = getBucketName();
 
-    const allPhotos = await this.prisma.photo.findMany({
-      where: { userId, deletedAt: null, private: false },
+    const photosWithHash = await this.prisma.photo.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+        private: false,
+        perceptualHash: { not: null },
+      },
       select: {
         id: true,
         s3Key: true,
@@ -56,25 +61,8 @@ export class AnalysisService {
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
+      take: 500,
     });
-
-    const needsHash = allPhotos.filter((p) => !p.perceptualHash);
-    for (const p of needsHash) {
-      try {
-        await this.analyzePhoto(userId, p.id);
-        p.perceptualHash =
-          (
-            await this.prisma.photo.findUnique({
-              where: { id: p.id },
-              select: { perceptualHash: true },
-            })
-          )?.perceptualHash ?? null;
-      } catch {
-        this.logger.warn(`Skipping hash for photo ${p.id}`);
-      }
-    }
-
-    const photosWithHash = allPhotos.filter((p) => p.perceptualHash);
 
     const presigned = await Promise.all(
       photosWithHash.map(async (p) => {
@@ -90,7 +78,7 @@ export class AnalysisService {
           id: p.id,
           url: uri,
           filename: p.filename,
-          perceptualHash: p.perceptualHash,
+          perceptualHash: p.perceptualHash!,
           blurred: p.blurred,
           blurScore: p.blurScore,
           createdAt: p.createdAt,
@@ -100,7 +88,6 @@ export class AnalysisService {
 
     const hashGroups = new Map<string, typeof presigned>();
     for (const p of presigned) {
-      if (!p.perceptualHash) continue;
       const existing = hashGroups.get(p.perceptualHash) || [];
       existing.push(p);
       hashGroups.set(p.perceptualHash, existing);

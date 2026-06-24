@@ -277,7 +277,7 @@ export class AlbumsService {
     });
   }
 
-  async getPhotos(userId: string, albumId: string) {
+  async getPhotos(userId: string, albumId: string, cursor?: string, maxKeys: number = 50) {
     const bucket = getBucketName();
 
     const albumMeta = await this.prisma.album.findFirst({
@@ -286,41 +286,52 @@ export class AlbumsService {
     });
     if (!albumMeta) throw new NotFoundException('Album not found');
 
-    const album = await this.prisma.album.findFirst({
-      where: { id: albumId, userId },
-      include: {
-        photos: {
-          where: {
-            deletedAt: null,
-            ...(albumMeta.vault ? {} : { private: false }),
-          },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        },
+    const photos = await this.prisma.photo.findMany({
+      where: {
+        albums: { some: { id: albumId } },
+        deletedAt: null,
+        ...(albumMeta.vault ? {} : { private: false }),
       },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: maxKeys,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
-    if (!album) throw new NotFoundException('Album not found');
 
     const presignExpiry = PRESIGN_EXPIRY;
     const results = await Promise.all(
-      album.photos.map(async (photo) => {
+      photos.map(async (photo) => {
         const thumbKey = photo.thumbS3Key;
-        const uri = await getSignedUrl(
-          this.s3,
-          new GetObjectCommand({
-            Bucket: bucket,
-            Key: thumbKey || photo.s3Key,
-          }),
-          { expiresIn: presignExpiry },
-        );
+        const [uri, fullUri] = await Promise.all([
+          getSignedUrl(
+            this.s3,
+            new GetObjectCommand({
+              Bucket: bucket,
+              Key: thumbKey || photo.s3Key,
+            }),
+            { expiresIn: presignExpiry },
+          ),
+          getSignedUrl(
+            this.s3,
+            new GetObjectCommand({
+              Bucket: bucket,
+              Key: photo.s3Key,
+            }),
+            { expiresIn: presignExpiry },
+          ),
+        ]);
         return {
           uri,
+          fullUri,
           id: photo.id,
           createdAt: photo.createdAt,
           private: photo.private,
         };
       }),
     );
-    return results;
+
+    const nextToken =
+      photos.length === maxKeys ? photos[photos.length - 1].id : null;
+    return { photos: results, nextToken };
   }
 
   async removePhotos(userId: string, albumId: string, photoIds: string[]) {
