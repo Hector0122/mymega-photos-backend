@@ -320,13 +320,18 @@ export class PhotosService implements OnModuleInit {
     const results = await Promise.all(
       dbPhotos.map(async (photo) => {
         const thumbKey = photo.thumbS3Key;
-        const [uri, fullUri] = await Promise.all([
+        const largeKey = photo.largeS3Key;
+        const [uri, fullUri, largeUri] = await Promise.all([
           this.getPresignedUrl(bucket, thumbKey || photo.s3Key, presignExpiry),
           this.getPresignedUrl(bucket, photo.s3Key, presignExpiry),
+          largeKey
+            ? this.getPresignedUrl(bucket, largeKey, presignExpiry)
+            : Promise.resolve(null),
         ]);
         return {
           uri,
           fullUri,
+          largeUri,
           date: photo.createdAt.toISOString().slice(0, 10),
           id: photo.id,
           favorite: photo.favorite,
@@ -348,20 +353,24 @@ export class PhotosService implements OnModuleInit {
     photoId: string,
   ): Promise<{
     url: string;
+    largeUri: string | null;
     albums: { id: string; name: string; vault: boolean }[];
   }> {
     const bucket = getBucketName();
     const photo = await this.findOwnedPhoto(photoId, userId);
 
-    const [url, albums] = await Promise.all([
+    const [url, largeUri, albums] = await Promise.all([
       this.getPresignedUrl(bucket, photo.s3Key, PRESIGN_EXPIRY),
+      photo.largeS3Key
+        ? this.getPresignedUrl(bucket, photo.largeS3Key, PRESIGN_EXPIRY)
+        : Promise.resolve(null),
       this.prisma.album.findMany({
         where: { userId, photos: { some: { id: photoId } } },
         select: { id: true, name: true, vault: true },
       }),
     ]);
 
-    return { url, albums };
+    return { url, largeUri, albums };
   }
 
   async getPhotoUrl(userId: string, photoId: string): Promise<string> {
@@ -457,12 +466,13 @@ export class PhotosService implements OnModuleInit {
       createdAt: Date;
       s3Key: string;
       thumbS3Key: string | null;
+      largeS3Key: string | null;
       filename: string;
     }>;
 
     if (person) {
       photos = await this.prisma.$queryRaw`
-        SELECT DISTINCT p.id, p."createdAt", p."s3Key", p."thumbS3Key", p.filename
+        SELECT DISTINCT p.id, p."createdAt", p."s3Key", p."thumbS3Key", p."largeS3Key", p.filename
         FROM "Photo" p
         INNER JOIN "Face" f ON f."photoId" = p.id
         WHERE p."userId" = ${userId}
@@ -478,7 +488,7 @@ export class PhotosService implements OnModuleInit {
       `;
     } else {
       photos = await this.prisma.$queryRaw`
-        SELECT id, "createdAt", "s3Key", "thumbS3Key", filename
+        SELECT id, "createdAt", "s3Key", "thumbS3Key", "largeS3Key", filename
         FROM "Photo"
         WHERE "userId" = ${userId}
           AND "deletedAt" IS NULL
@@ -504,14 +514,19 @@ export class PhotosService implements OnModuleInit {
         .map(async ([year, yearPhotos]) => {
           const photo = yearPhotos[0];
           const thumbKey = photo.thumbS3Key || photo.s3Key;
-          const [uri, fullUri] = await Promise.all([
+          const largeKey = photo.largeS3Key;
+          const [uri, fullUri, largeUri] = await Promise.all([
             this.getPresignedUrl(bucket, thumbKey, PRESIGN_EXPIRY),
             this.getPresignedUrl(bucket, photo.s3Key, PRESIGN_EXPIRY),
+            largeKey
+              ? this.getPresignedUrl(bucket, largeKey, PRESIGN_EXPIRY)
+              : Promise.resolve(null),
           ]);
           return {
             year,
             uri,
             fullUri,
+            largeUri,
             id: photo.id,
             filename: photo.filename,
             count: yearPhotos.length,
@@ -730,14 +745,19 @@ export class PhotosService implements OnModuleInit {
     const results = await Promise.all(
       photos.map(async (photo) => {
         const thumbKey = photo.thumbS3Key;
-        const [uri, fullUri] = await Promise.all([
+        const largeKey = photo.largeS3Key;
+        const [uri, fullUri, largeUri] = await Promise.all([
           this.getPresignedUrl(bucket, thumbKey || photo.s3Key, PRESIGN_EXPIRY),
           this.getPresignedUrl(bucket, photo.s3Key, PRESIGN_EXPIRY),
+          largeKey
+            ? this.getPresignedUrl(bucket, largeKey, PRESIGN_EXPIRY)
+            : Promise.resolve(null),
         ]);
         return {
           id: photo.id,
           uri,
           fullUri,
+          largeUri,
           filename: photo.filename,
           deletedAt: photo.deletedAt,
           size: photo.size,

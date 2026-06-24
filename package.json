@@ -24,6 +24,7 @@
     "cruzar-db-r2": "npx tsx scripts/db-r2-diff.ts",
     "clean-dups": "npx tsx scripts/clean-dups.ts",
     "clean-r2": "npx tsx scripts/clean-r2.ts",
+    "generate-large": "npx tsx scripts/generate-large-versions.ts",
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {

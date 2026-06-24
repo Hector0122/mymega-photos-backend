@@ -301,7 +301,8 @@ export class AlbumsService {
     const results = await Promise.all(
       photos.map(async (photo) => {
         const thumbKey = photo.thumbS3Key;
-        const [uri, fullUri] = await Promise.all([
+        const largeKey = photo.largeS3Key;
+        const [uri, fullUri, largeUri] = await Promise.all([
           getSignedUrl(
             this.s3,
             new GetObjectCommand({
@@ -318,10 +319,21 @@ export class AlbumsService {
             }),
             { expiresIn: presignExpiry },
           ),
+          largeKey
+            ? getSignedUrl(
+                this.s3,
+                new GetObjectCommand({
+                  Bucket: bucket,
+                  Key: largeKey,
+                }),
+                { expiresIn: presignExpiry },
+              )
+            : Promise.resolve(null),
         ]);
         return {
           uri,
           fullUri,
+          largeUri,
           id: photo.id,
           createdAt: photo.createdAt,
           private: photo.private,

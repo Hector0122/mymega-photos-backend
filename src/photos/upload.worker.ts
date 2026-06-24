@@ -8,7 +8,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import * as exifr from 'exifr';
 const req = createRequire(__filename);
 const { computePerceptualHash } = req('../common/image-analysis');
-const { THUMB_RESIZE, THUMB_QUALITY } = req('../common/constants');
+const { THUMB_RESIZE, THUMB_QUALITY, LARGE_RESIZE, LARGE_QUALITY } = req('../common/constants');
 
 interface UploadWorkerInput {
   batchId: string;
@@ -236,12 +236,28 @@ async function run(input: UploadWorkerInput) {
         }),
       );
 
+      const largeKey = `large/${userId}/${timestamp}-${file.filename}`;
+      const largeBuffer = await sharp(buffer)
+        .resize(LARGE_RESIZE, LARGE_RESIZE, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: LARGE_QUALITY })
+        .toBuffer();
+
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: largeKey,
+          Body: largeBuffer,
+          ContentType: 'image/jpeg',
+        }),
+      );
+
       const perceptualHash = await computePerceptualHash(buffer);
 
       const created = await prisma.photo.create({
         data: {
           s3Key: fullKey,
           thumbS3Key: thumbKey,
+          largeS3Key: largeKey,
           url,
           filename: file.filename,
           mimeType: file.mimeType,

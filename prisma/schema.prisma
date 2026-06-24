@@ -49,6 +49,7 @@ model Photo {
 
   s3Key     String   @unique
   thumbS3Key String?
+  largeS3Key String?
   url       String
 
   filename  String
@@ -77,6 +78,9 @@ model Photo {
   @@index([userId, deletedAt, createdAt])
   @@index([userId, deletedAt, private])
   @@index([userId, blurred])
+  @@index([filename])
+  @@index([mimeType])
+  @@index([tags])
   @@index([perceptualHash])
 }
 
