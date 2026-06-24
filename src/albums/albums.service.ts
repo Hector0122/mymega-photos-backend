@@ -277,7 +277,12 @@ export class AlbumsService {
     });
   }
 
-  async getPhotos(userId: string, albumId: string, cursor?: string, maxKeys: number = 50) {
+  async getPhotos(
+    userId: string,
+    albumId: string,
+    cursor?: string,
+    maxKeys: number = 50,
+  ) {
     const bucket = getBucketName();
 
     const albumMeta = await this.prisma.album.findFirst({
