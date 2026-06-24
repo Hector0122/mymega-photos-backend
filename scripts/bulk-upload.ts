@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, extname, resolve, basename } from 'path';
+import { config } from 'dotenv';
 import { performance } from 'perf_hooks';
 import cliProgress from 'cli-progress';
+
+config({ path: resolve(__dirname, '..', '.env') });
 import { randomUUID } from 'crypto';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
@@ -183,7 +186,7 @@ async function main() {
     endpoint: r2Endpoint,
     forcePathStyle: true,
     credentials: { accessKeyId: r2AccessKey, secretAccessKey: r2SecretKey },
-    requestHandler: { requestTimeout: 300_000 },
+    requestHandler: { requestTimeout: 1_800_000 },
   })
 
   const results: Result[] = []
@@ -239,8 +242,21 @@ async function main() {
   })
   uploadBar.start(toUpload.length, 0, { current: '' })
 
-  const CONCURRENCY = 15
+  const CONCURRENCY = 8
   let uploadedCount = 0
+
+  async function sendWithRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 2000): Promise<T> {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        return await fn()
+      } catch (err: any) {
+        if (attempt === retries - 1) throw err
+        console.warn(`  ⚠️ Intento ${attempt + 1}/${retries} falló, reintentando en ${delayMs}ms...`)
+        await new Promise(r => setTimeout(r, delayMs))
+      }
+    }
+    throw new Error('unreachable')
+  }
 
   async function uploadOne(filePath: string): Promise<Result> {
     const filename = basename(filePath).replace(/[ ()]/g, '_')
@@ -269,9 +285,9 @@ async function main() {
       } catch { /* not in R2 yet */ }
 
       if (!existsInR2) {
-        await s3.send(new PutObjectCommand({
+        await sendWithRetry(() => s3.send(new PutObjectCommand({
           Bucket: r2Bucket, Key: fullKey, Body: buffer, ContentType: mimeType,
-        }))
+        })))
 
         if (isImage) {
           try {

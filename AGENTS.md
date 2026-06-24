@@ -186,13 +186,16 @@ adb reverse tcp:3000 tcp:3000
 - **Nuevos scripts**: `scripts/` — bulk-upload, clean-dups, clean-r2, count-r2, db-r2-diff
 - **Reconocimiento facial**: Detección de caras con face-api + sharp, descriptor FaceNet 128-dim, agrupación euclidiana, modelo `Face` en Prisma, auto-detección al subir fotos, People Browser UI, búsqueda/filtro por persona, memorias por persona, stats faciales
 
-## Scripts (local laptop)
+## Scripts (`scripts/`)
 
-- **Bulk upload** — `scripts/bulk-upload.ts`, import 100GB from external drive directly to R2. See `AI_PLAN.md`.
-- **Clean R2** — `scripts/clean-r2.ts`, manage/delete R2 objects.
-- **Count R2** — `scripts/count-r2.ts`, count objects in R2 bucket.
-- **Compare R2 vs DB** — `scripts/db-r2-diff.ts`, diff between R2 and database records.
-- **Clean duplicates** — `scripts/clean-dups.ts`, remove duplicate objects from R2.
+| Script | Descripción |
+|---|---|
+| `bulk-upload.ts` | Subida masiva desde disco externo a R2 + DB con dedup por hash perceptual |
+| `generate-video-thumbnails.ts` | Genera thumbnails de video faltantes (ffmpeg) |
+| `count-r2.ts` | Cuenta objetos en R2 |
+| `db-r2-diff.ts` | Compara DB vs R2 |
+| `fix-db-r2-diff.ts` | Repara discrepancias DB/R2 |
+| `clean-r2.ts` | Elimina objetos en R2 por prefijo |
 
 ## Coding conventions
 

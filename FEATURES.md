@@ -103,6 +103,19 @@
 
 ---
 
+### Scripts de mantenimiento
+
+| Script | Descripción | Uso |
+|---|---|---|
+| `bulk-upload.ts` | Subida masiva desde disco externo a R2 + DB con detección de duplicados por hash perceptual | `npx tsx scripts/bulk-upload.ts /ruta/al/disco [--no-dedup]` |
+| `generate-video-thumbnails.ts` | Genera thumbnails faltantes para videos (descarga de R2, captura con ffmpeg, subida a R2) | `npx tsx scripts/generate-video-thumbnails.ts --user-id=<uuid>` |
+| `count-r2.ts` | Cuenta objetos en el bucket R2 (sin DB) | `npx tsx scripts/count-r2.ts` |
+| `db-r2-diff.ts` | Compara registros en DB contra objetos en R2, reporta discrepancias | `npx tsx scripts/db-r2-diff.ts` |
+| `fix-db-r2-diff.ts` | Repara discrepancias entre DB y R2 (inserta registros faltantes, usa `--execute` para escribir) | `npx tsx scripts/fix-db-r2-diff.ts [--execute]` |
+| `clean-r2.ts` | Elimina objetos en R2 por prefijo con confirmación interactiva | `npx tsx scripts/clean-r2.ts` |
+
+---
+
 ## ✅ Fixes críticos aplicados
 
 | # | Fix | Archivos |
