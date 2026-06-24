@@ -44,7 +44,10 @@ export class PhotosService implements OnModuleInit {
   }
 
   private setCachedUrl(key: string, url: string) {
-    this.urlCache.set(key, { url, expiresAt: Date.now() + PRESIGN_CACHE_TTL_MS });
+    this.urlCache.set(key, {
+      url,
+      expiresAt: Date.now() + PRESIGN_CACHE_TTL_MS,
+    });
     if (this.urlCache.size > 5000) {
       const now = Date.now();
       for (const [k, v] of this.urlCache) {
@@ -53,7 +56,11 @@ export class PhotosService implements OnModuleInit {
     }
   }
 
-  private async getPresignedUrl(bucket: string, key: string, expiresIn: number): Promise<string> {
+  private async getPresignedUrl(
+    bucket: string,
+    key: string,
+    expiresIn: number,
+  ): Promise<string> {
     const cacheKey = `${bucket}:${key}`;
     const cached = this.getCachedUrl(cacheKey);
     if (cached) return cached;
@@ -312,7 +319,7 @@ export class PhotosService implements OnModuleInit {
       },
       take: maxKeys,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     const presignExpiry = PRESIGN_EXPIRY;
