@@ -184,3 +184,103 @@ export DATABASE_URL="postgresql://..."
 export BACKEND_URL="https://tu-app.railway.app"
 export JWT_TOKEN="..."  # o usa login interactivo
 ```
+
+---
+
+## Large Image (1920px) — Feature complete
+
+Generación automática de una versión intermedia (1920px, JPEG 85%) entre el thumbnail (300px) y el original full-resolution. El objetivo es que PhotoPreview cargue ~200-500 KB en vez de 3-12 MB.
+
+### Arquitectura
+
+```
+Original (full res, ~6.5 MB) ──► Large (1920px, ~300 KB) ──► Thumbnail (300px, ~13 KB)
+     │                                                             │
+     ▼                                                             ▼
+  Download/export                                             PhotoPreview
+  (si el usuario quiere                                     (carga instantánea)
+   la máxima calidad)
+```
+
+Tres archivos por foto en R2:
+| Tipo | Prefijo R2 | Tamaño | Uso |
+|---|---|---|---|
+| Original | `uploads/` | 3-12 MB | Download/export |
+| Large | `large/` | 200-500 KB | **PhotoPreview** (ZoomableImage) |
+| Thumbnail | `thumbnails/` | 10-20 KB | Grid/blurred background |
+
+Los videos se excluyen (ya se stremean, no tienen zoom ni thumbnail poster).
+
+### Cambios realizados
+
+#### Backend
+
+| Archivo | Cambio |
+|---|---|
+| `prisma/schema.prisma` | Campo `largeS3Key String?` en `Photo` + indexes `[filename]`, `[mimeType]`, `[tags]` (restaurados) |
+| Migración | `20260624232211_add_large_s3_key` — añade columna a PostgreSQL |
+| `src/common/constants.ts` | `LARGE_RESIZE = 1920`, `LARGE_QUALITY = 85` |
+| `src/photos/upload.worker.ts` | Genera large con sharp (1920px, `fit: 'inside'`, `withoutEnlargement: true`) después del thumbnail, sube a `large/{userId}/{timestamp}-{filename}`, guarda `largeS3Key` en DB |
+| `src/photos/photos.service.ts` | `getPhotos`, `getPhotoDetail`, `getThisDayPhotos`, `getMemories`, `getTrash` devuelven `largeUri` (presigned URL de la versión large) |
+| `src/albums/albums.service.ts` | `getPhotos` (album listing) devuelve `largeUri` |
+
+#### Frontend
+
+| Archivo | Cambio |
+|---|---|
+| `api/client.ts` | `fetchPhotosPage` y `getPhotoDetail` tipados con `largeUri: string \| null` |
+| `pages/PhotoPreview/index.tsx` | `PhotoItem` agrega `largeUri`. `PhotoPage` tiene estado `largeUri` separado. `ZoomableImage` usa `largeUri ?? fullUri ?? item.uri`. Prefetch de adyacentes usa `largeUri` si existe. |
+| `pages/Home/utils.ts` | Tipo `Photo` agrega `largeUri?: string \| null` |
+| `pages/Home/index.tsx` | Pasa `largeUri` al navegar a PhotoPreview |
+| `pages/Albums/AlbumView.tsx` | Tipo `Photo` agrega `fullUri` y `largeUri`, los pasa al navegar |
+| `components/RecuerdosSection.tsx` | Tipo `Recuerdo` agrega `largeUri` |
+
+### Backfill para fotos existentes
+
+Script que procesa las ~13k fotos existentes que aún no tienen versión large.
+
+```
+scripts/generate-large-versions.ts
+```
+
+**Uso por tandas (recomendado para no saturar la red):**
+
+```bash
+cd vaulta_backend
+
+# Tanda 1: procesa 1500 fotos (~30-45 min)
+npm run generate-large -- --limit=1500
+
+# Tanda 2...N: repetir hasta que salga "No hay fotos pendientes"
+npm run generate-large -- --limit=1500
+```
+
+**Características del script:**
+- Concurrencia 3 (bajo perfil de red)
+- Las fotos ya procesadas se saltan automáticamente (filtra `largeS3Key IS NULL`)
+- Se puede interrumpir con Ctrl+C y reanudar sin duplicar trabajo
+- Barra de progreso con: %, OK/FAIL, MB descargados/subidos, ETA, nombre del archivo actual, compresión obtenida
+- Muestra errores completos (sin límite)
+- Resumen final con tiempo, MB y % de ahorro
+
+**Estimación de recursos para backfill completo:**
+
+| Concepto | Valor |
+|---|---|
+| Fotos sin large | ~13,100 |
+| Descarga estimada | ~59 GB (13k × 4.5 MB) |
+| Subida estimada | ~3.9 GB (13k × 300 KB) |
+| Tiempo estimado | ~4-6 h (con 1500/tanda) |
+| Ahorro en descarga para la app | ~95% (6.5 MB → 300 KB por foto) |
+
+**Fotos nuevas:** No requieren backfill — el upload worker ya genera la versión large automáticamente.
+
+### Costos adicionales en R2
+
+| Concepto | Valor |
+|---|---|
+| Archivos nuevos | ~13,100 |
+| Almacenamiento extra | ~3.9 GB |
+| Costo R2 extra/mes | ~$0.06 |
+| **Total R2** | **~$1.41/mes** (84.4 GB actual + 3.9 GB large)
+```
