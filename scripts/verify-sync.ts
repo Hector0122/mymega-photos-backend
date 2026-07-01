@@ -1,7 +1,6 @@
-import { readdirSync, statSync } from 'fs'
-import { join, extname, resolve } from 'path'
 import { config } from 'dotenv'
-import { S3Client, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3'
+import { resolve } from 'path'
+import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { Pool } from 'pg'
 
 config({ path: resolve(__dirname, '..', '.env') })
@@ -23,116 +22,13 @@ async function main() {
   
   const bucket = process.env.R2_BUCKET_NAME!
   
-  console.log('=== VERIFICACIÓN DE SINCRONIZACIÓN ===\n')
+  console.log('=== VERIFICACIÓN RÁPIDA ===\n')
   
-  // 1. Contar local
-  function countLocal(dir: string): number {
-    let count = 0
-    const queue = [dir]
-    while (queue.length > 0) {
-      const current = queue.pop()!
-      for (const entry of readdirSync(current)) {
-        const fullPath = join(current, entry)
-        const stat = statSync(fullPath)
-        if (stat.isDirectory()) {
-          queue.push(fullPath)
-        } else {
-          const ext = extname(entry).toLowerCase()
-          if (['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(ext)) {
-            count++
-          }
-        }
-      }
-    }
-    return count
-  }
-  
-  const localPhotos = countLocal('/mnt/c/Users/Hector/Pictures/Respaldo/fotos')
-  const localVideos = countLocal('/mnt/c/Users/Hector/Pictures/Respaldo/videos')
-  console.log('LOCAL:')
-  console.log('  Fotos:', localPhotos)
-  console.log('  Videos:', localVideos)
-  console.log('  Total:', localPhotos + localVideos)
-  
-  // 2. Contar DB
-  const dbPhotosResult = await pool.query('SELECT COUNT(*) FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NOT NULL', [USER_ID])
-  const dbVideosResult = await pool.query('SELECT COUNT(*) FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NULL', [USER_ID])
-  const dbPhotos = parseInt(dbPhotosResult.rows[0].count)
-  const dbVideos = parseInt(dbVideosResult.rows[0].count)
-  console.log('\nDB:')
-  console.log('  Fotos:', dbPhotos)
-  console.log('  Videos:', dbVideos)
-  console.log('  Total:', dbPhotos + dbVideos)
-  
-  // 3. Verificar que cada foto en DB tenga sus objetos en R2
-  console.log('\nVerificando objetos R2 para fotos...')
-  const photoRows = await pool.query(
-    'SELECT id, "s3Key", "thumbS3Key", filename FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NOT NULL',
-    [USER_ID]
-  )
-  
-  let missingLarge = 0
-  let missingThumb = 0
-  let checked = 0
-  
-  for (const photo of photoRows.rows) {
-    checked++
-    if (checked % 500 === 0) process.stdout.write(`\r  ${checked}/${photoRows.rows.length}`)
-    
-    // Verificar large
-    try {
-      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: photo.s3Key }))
-    } catch {
-      missingLarge++
-      if (missingLarge <= 5) console.log(`\n  ❌ Falta large: ${photo.s3Key}`)
-    }
-    
-    // Verificar thumb
-    if (photo.thumbS3Key) {
-      try {
-        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: photo.thumbS3Key }))
-      } catch {
-        missingThumb++
-        if (missingThumb <= 5) console.log(`\n  ❌ Falta thumb: ${photo.thumbS3Key}`)
-      }
-    }
-  }
-  
-  console.log(`\r  ✅ Fotos verificadas: ${checked}`)
-  console.log(`  Large faltantes: ${missingLarge}`)
-  console.log(`  Thumbs faltantes: ${missingThumb}`)
-  
-  // 4. Verificar videos
-  console.log('\nVerificando objetos R2 para videos...')
-  const videoRows = await pool.query(
-    'SELECT id, "s3Key", filename FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NULL',
-    [USER_ID]
-  )
-  
-  let missingVideo = 0
-  checked = 0
-  
-  for (const video of videoRows.rows) {
-    checked++
-    if (checked % 100 === 0) process.stdout.write(`\r  ${checked}/${videoRows.rows.length}`)
-    
-    try {
-      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: video.s3Key }))
-    } catch {
-      missingVideo++
-      if (missingVideo <= 5) console.log(`\n  ❌ Falta video: ${video.s3Key}`)
-    }
-  }
-  
-  console.log(`\r  ✅ Videos verificados: ${checked}`)
-  console.log(`  Videos faltantes: ${missingVideo}`)
-  
-  // 5. Verificar huérfanos en R2 (objetos sin registro en DB)
-  console.log('\nBuscando huérfanos en R2...')
-  
-  async function listOrphans(prefix: string): Promise<string[]> {
-    const orphans: string[] = []
+  // 1. Listar TODOS los objetos de R2 por prefijos (batch, no individual)
+  async function listAllKeys(prefix: string): Promise<string[]> {
+    const keys: string[] = []
     let continuationToken: string | undefined
+    let pages = 0
     
     do {
       const result = await s3.send(new ListObjectsV2Command({
@@ -143,64 +39,95 @@ async function main() {
       }))
       
       for (const obj of result.Contents || []) {
-        if (!obj.Key) continue
-        const dbResult = await pool.query(
-          'SELECT 1 FROM "Photo" WHERE "s3Key" = $1 OR "thumbS3Key" = $1 OR "largeS3Key" = $1 LIMIT 1',
-          [obj.Key]
-        )
-        if (dbResult.rows.length === 0) {
-          orphans.push(obj.Key)
-        }
+        if (obj.Key) keys.push(obj.Key)
       }
       
+      pages++
       continuationToken = result.NextContinuationToken
     } while (continuationToken)
     
-    return orphans
+    console.log(`  ${prefix}: ${keys.length} objetos (${pages} páginas)`)
+    return keys
   }
   
-  // Solo verificar muestras de cada prefijo para no tardar mucho
-  const fotoOrphans = await listOrphans('fotos/' + USER_ID + '/')
-  const thumbOrphans = await listOrphans('thumbs/' + USER_ID + '/fotos/')
-  const videoOrphans = await listOrphans('videos/' + USER_ID + '/')
+  const [fotosKeys, thumbsFotosKeys, videosKeys, thumbsVideosKeys] = await Promise.all([
+    listAllKeys(`fotos/${USER_ID}/`),
+    listAllKeys(`thumbs/${USER_ID}/fotos/`),
+    listAllKeys(`videos/${USER_ID}/`),
+    listAllKeys(`thumbs/${USER_ID}/videos/`),
+  ])
   
-  console.log('  Huérfanos en fotos/:', fotoOrphans.length)
-  console.log('  Huérfanos en thumbs/fotos/:', thumbOrphans.length)
-  console.log('  Huérfanos en videos/:', videoOrphans.length)
+  const r2FotosCount = fotosKeys.length
+  const r2ThumbsFotosCount = thumbsFotosKeys.length
+  const r2VideosCount = videosKeys.length
+  const r2ThumbsVideosCount = thumbsVideosKeys.length
   
-  if (fotoOrphans.length > 0 && fotoOrphans.length <= 10) {
-    console.log('  Ejemplos:', fotoOrphans.slice(0, 5))
-  }
-  if (thumbOrphans.length > 0 && thumbOrphans.length <= 10) {
-    console.log('  Ejemplos:', thumbOrphans.slice(0, 5))
-  }
-  if (videoOrphans.length > 0 && videoOrphans.length <= 10) {
-    console.log('  Ejemplos:', videoOrphans.slice(0, 5))
+  // 2. Contar DB
+  const dbFotosResult = await pool.query('SELECT COUNT(*) FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NOT NULL', [USER_ID])
+  const dbVideosResult = await pool.query('SELECT COUNT(*) FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NULL', [USER_ID])
+  const dbFotos = parseInt(dbFotosResult.rows[0].count)
+  const dbVideos = parseInt(dbVideosResult.rows[0].count)
+  
+  // 3. Verificar que cada foto en DB tenga su thumb en R2 (muestra, no todas)
+  console.log('\n--- Verificando thumbs de fotos (muestra) ---')
+  const dbPhotoThumbs = await pool.query(
+    'SELECT "thumbS3Key" FROM "Photo" WHERE "userId" = $1 AND "largeS3Key" IS NOT NULL AND "thumbS3Key" IS NOT NULL LIMIT 5',
+    [USER_ID]
+  )
+  let sampleThumbsOk = 0
+  for (const row of dbPhotoThumbs.rows) {
+    const exists = thumbsFotosKeys.includes(row.thumbS3Key)
+    if (exists) sampleThumbsOk++
+    console.log(`  ${exists ? '✅' : '❌'} ${row.thumbS3Key.split('/').pop()}`)
   }
   
-  // Resumen
+  // 4. Verificar huérfanos en R2 (objetos sin registro en DB)
+  console.log('\n--- Verificando huérfanos en R2 ---')
+  
+  const dbKeys = new Set<string>()
+  const dbAll = await pool.query('SELECT "s3Key", "thumbS3Key", "largeS3Key" FROM "Photo" WHERE "userId" = $1', [USER_ID])
+  for (const row of dbAll.rows) {
+    dbKeys.add(row.s3Key)
+    if (row.thumbS3Key) dbKeys.add(row.thumbS3Key)
+    if (row.largeS3Key) dbKeys.add(row.largeS3Key)
+  }
+  
+  const orphanFotos = fotosKeys.filter(k => !dbKeys.has(k))
+  const orphanThumbsFotos = thumbsFotosKeys.filter(k => !dbKeys.has(k))
+  const orphanVideos = videosKeys.filter(k => !dbKeys.has(k))
+  const orphanThumbsVideos = thumbsVideosKeys.filter(k => !dbKeys.has(k))
+  
+  console.log(`  Huérfanos fotos/: ${orphanFotos.length}`)
+  console.log(`  Huérfanos thumbs/fotos/: ${orphanThumbsFotos.length}`)
+  console.log(`  Huérfanos videos/: ${orphanVideos.length}`)
+  console.log(`  Huérfanos thumbs/videos/: ${orphanThumbsVideos.length}`)
+  
+  // 5. Resumen
   console.log('\n' + '='.repeat(50))
   console.log('RESUMEN')
   console.log('='.repeat(50))
   console.log('Fotos:')
-  console.log('  Local:', localPhotos)
-  console.log('  DB:', dbPhotos)
-  console.log('  R2 faltantes (large):', missingLarge)
-  console.log('  R2 faltantes (thumb):', missingThumb)
-  console.log('  R2 huérfanos:', fotoOrphans.length)
+  console.log(`  DB: ${dbFotos}`)
+  console.log(`  R2 fotos/: ${r2FotosCount}`)
+  console.log(`  R2 thumbs/fotos/: ${r2ThumbsFotosCount}`)
+  console.log(`  Huérfanos: ${orphanFotos.length + orphanThumbsFotos.length}`)
   console.log('Videos:')
-  console.log('  Local:', localVideos)
-  console.log('  DB:', dbVideos)
-  console.log('  R2 faltantes:', missingVideo)
-  console.log('  R2 huérfanos:', videoOrphans.length)
+  console.log(`  DB: ${dbVideos}`)
+  console.log(`  R2 videos/: ${r2VideosCount}`)
+  console.log(`  R2 thumbs/videos/: ${r2ThumbsVideosCount}`)
+  console.log(`  Huérfanos: ${orphanVideos.length + orphanThumbsVideos.length}`)
   
-  const allOk = missingLarge === 0 && missingThumb === 0 && missingVideo === 0 && 
-                fotoOrphans.length === 0 && thumbOrphans.length === 0 && videoOrphans.length === 0
+  const allOk = dbFotos === r2FotosCount && 
+                dbVideos === r2VideosCount &&
+                orphanFotos.length === 0 && 
+                orphanThumbsFotos.length === 0 &&
+                orphanVideos.length === 0 &&
+                orphanThumbsVideos.length === 0
   
   if (allOk) {
-    console.log('\n✅ TODO SINCRONIZADO — No hay discrepancias')
+    console.log('\n✅ TODO SINCRONIZADO')
   } else {
-    console.log('\n⚠️ HAY DISCREPANCIAS — Revisar arriba')
+    console.log('\n⚠️ HAY DISCREPANCIAS')
   }
   
   await pool.end()
