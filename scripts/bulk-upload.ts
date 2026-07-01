@@ -6,11 +6,11 @@ import cliProgress from 'cli-progress';
 
 config({ path: resolve(__dirname, '..', '.env') });
 import { randomUUID } from 'crypto';
-import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import * as exifr from 'exifr';
 import { computePerceptualHash } from '../src/common/image-analysis';
-import { THUMB_RESIZE, THUMB_QUALITY } from '../src/common/constants';
+import { THUMB_RESIZE, THUMB_QUALITY, LARGE_RESIZE, LARGE_QUALITY } from '../src/common/constants';
 
 const ALLOWED_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif',
@@ -180,6 +180,13 @@ async function main() {
   const userId = userResult.rows[0].id
   console.log(`Usuario: ${email} (${userId})`)
 
+  const existingResult = await pool.query(
+    'SELECT "s3Key" FROM "Photo" WHERE "userId" = $1',
+    [userId]
+  )
+  const existingKeys = new Set(existingResult.rows.map((r: any) => r.s3Key))
+  console.log(`  Keys existentes en DB: ${existingKeys.size}`)
+
   const r2Endpoint = `https://${r2AccountId}.r2.cloudflarestorage.com`
   const s3 = new S3Client({
     region: 'auto',
@@ -242,8 +249,34 @@ async function main() {
   })
   uploadBar.start(toUpload.length, 0, { current: '' })
 
+  const MONTHS = [
+    '01-Enero','02-Febrero','03-Marzo','04-Abril','05-Mayo','06-Junio',
+    '07-Julio','08-Agosto','09-Septiembre','10-Octubre','11-Noviembre','12-Diciembre',
+  ]
+
+  function fmtDate(d: Date): string {
+    const y = d.getFullYear()
+    const mo = String(d.getMonth() + 1).padStart(2, '0')
+    const da = String(d.getDate()).padStart(2, '0')
+    const h = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    const s = String(d.getSeconds()).padStart(2, '0')
+    return `${y}-${mo}-${da}_${h}${mi}${s}`
+  }
+
+  function colLabel(n: number): string {
+    let s = ''
+    while (n > 0) {
+      n--
+      s = String.fromCharCode(65 + (n % 26)) + s
+      n = Math.floor(n / 26)
+    }
+    return s
+  }
+
   const CONCURRENCY = 8
   let uploadedCount = 0
+  const usedNames = new Map<string, number>()
 
   async function sendWithRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 2000): Promise<T> {
     for (let attempt = 0; attempt < retries; attempt++) {
@@ -259,7 +292,7 @@ async function main() {
   }
 
   async function uploadOne(filePath: string): Promise<Result> {
-    const filename = basename(filePath).replace(/[ ()]/g, '_')
+    const filename = basename(filePath).replace(/[^\w.\-]/g, '_')
     const ext = extname(filePath).toLowerCase()
     const mimeType = getMimeType(ext)
     const isVideo = VIDEO_EXTS.has(ext)
@@ -268,53 +301,84 @@ async function main() {
     try {
       const buffer = readFileSync(filePath)
       const photoDate = await getPhotoDate(filePath, buffer)
-      const timestamp = photoDate.getTime()
-      const fullKey = `uploads/${userId}/${timestamp}-${filename}`
-      const encodedKey = fullKey.split('/').map(encodeURIComponent).join('/')
-      const publicUrl = r2PublicUrl
+      const year = photoDate.getFullYear()
+      const month = MONTHS[photoDate.getMonth()]
+      const dateStr = fmtDate(photoDate)
+
+      let s3Key: string
+      let thumbS3Key: string | null = null
+      let largeS3Key: string | null = null
+      let perceptualHash: string | null = null
+
+      if (isVideo) {
+        let suffix = ''
+        let attempt = 0
+        let candidateKey = `videos/${userId}/${year}/${month}/${dateStr}${ext}`
+        while (existingKeys.has(candidateKey) || usedNames.has(candidateKey)) {
+          attempt++
+          suffix = '_' + colLabel(attempt)
+          candidateKey = `videos/${userId}/${year}/${month}/${dateStr}${suffix}${ext}`
+        }
+        usedNames.set(candidateKey, 1)
+        s3Key = candidateKey
+        // Upload original video
+        await sendWithRetry(() => s3.send(new PutObjectCommand({
+          Bucket: r2Bucket, Key: s3Key, Body: buffer, ContentType: mimeType,
+        })))
+        // Videos don't have thumbnails generated in bulk-upload (no ffmpeg)
+      } else {
+        // Resolve key conflicts
+        let suffix = ''
+        let attempt = 0
+        let candidateKey = `fotos/${userId}/${year}/${month}/${dateStr}.jpg`
+        while (existingKeys.has(candidateKey) || usedNames.has(candidateKey)) {
+          attempt++
+          suffix = '_' + colLabel(attempt)
+          candidateKey = `fotos/${userId}/${year}/${month}/${dateStr}${suffix}.jpg`
+        }
+        usedNames.set(candidateKey, 1)
+
+        // Generate and upload thumbnail
+        const thumbKey = `thumbs/${userId}/fotos/${year}/${month}/${dateStr}${suffix}.jpg`
+        const thumbBuffer = await sharp(buffer, { failOn: 'none' })
+          .resize(THUMB_RESIZE)
+          .jpeg({ quality: THUMB_QUALITY })
+          .toBuffer()
+        await s3.send(new PutObjectCommand({
+          Bucket: r2Bucket, Key: thumbKey, Body: thumbBuffer, ContentType: 'image/jpeg',
+        }))
+        thumbS3Key = thumbKey
+
+        // Generate and upload large version (master)
+        const largeKey = candidateKey
+        const largeBuffer = await sharp(buffer, { failOn: 'none' })
+          .resize(LARGE_RESIZE, LARGE_RESIZE, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: LARGE_QUALITY })
+          .toBuffer()
+        await s3.send(new PutObjectCommand({
+          Bucket: r2Bucket, Key: largeKey, Body: largeBuffer, ContentType: 'image/jpeg',
+        }))
+        largeS3Key = largeKey
+        s3Key = largeKey
+
+        try {
+          perceptualHash = await computePerceptualHash(buffer)
+        } catch {}
+      }
+
+      const encodedKey = s3Key.split('/').map(encodeURIComponent).join('/')
+      const url = r2PublicUrl
         ? `${r2PublicUrl}/${encodedKey}`
         : `${r2Endpoint}/${r2Bucket}/${encodedKey}`
 
-      let thumbS3Key: string | null = null
-      let perceptualHash: string | null = null
-      let existsInR2 = false
-
-      try {
-        await s3.send(new HeadObjectCommand({ Bucket: r2Bucket, Key: fullKey }))
-        existsInR2 = true
-      } catch { /* not in R2 yet */ }
-
-      if (!existsInR2) {
-        await sendWithRetry(() => s3.send(new PutObjectCommand({
-          Bucket: r2Bucket, Key: fullKey, Body: buffer, ContentType: mimeType,
-        })))
-
-        if (isImage) {
-          try {
-            const thumbKey = `thumbnails/${userId}/${timestamp}-${filename}`
-            const thumbBuffer = await sharp(buffer)
-              .resize(THUMB_RESIZE)
-              .jpeg({ quality: THUMB_QUALITY })
-              .toBuffer()
-            await s3.send(new PutObjectCommand({
-              Bucket: r2Bucket, Key: thumbKey, Body: thumbBuffer, ContentType: 'image/jpeg',
-            }))
-            thumbS3Key = thumbKey
-          } catch {}
-          try {
-            perceptualHash = await computePerceptualHash(buffer)
-          } catch {}
-        }
-      }
-
       await pool.query(
-        `INSERT INTO "Photo" ("id", "s3Key", "thumbS3Key", "url", "filename", "mimeType", "size", "perceptualHash", "createdAt", "userId")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO "Photo" ("id", "s3Key", "thumbS3Key", "largeS3Key", "url", "filename", "mimeType", "size", "perceptualHash", "createdAt", "userId")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT ("s3Key") DO NOTHING`,
-        [randomUUID(), fullKey, thumbS3Key, publicUrl, filename, mimeType, buffer.length, perceptualHash, photoDate, userId]
+        [randomUUID(), s3Key, thumbS3Key, largeS3Key, url, filename, mimeType, buffer.length, perceptualHash, photoDate, userId]
       )
 
-      return { filepath: filePath, filename, sizeBytes: buffer.length, status: existsInR2 ? 'subido' : 'subido', error: '' }
+      return { filepath: filePath, filename, sizeBytes: buffer.length, status: 'subido', error: '' }
     } catch (err: any) {
       const errMsg = err instanceof Error ? err.message : String(err)
       return { filepath: filePath, filename, sizeBytes: statSync(filePath).size, status: 'fallido', error: errMsg }

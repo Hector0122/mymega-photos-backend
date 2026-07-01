@@ -67,6 +67,21 @@ async function run(input: UploadWorkerInput) {
     });
   };
 
+  const MONTHS = [
+    '01-Enero','02-Febrero','03-Marzo','04-Abril','05-Mayo','06-Junio',
+    '07-Julio','08-Agosto','09-Septiembre','10-Octubre','11-Noviembre','12-Diciembre',
+  ]
+
+  function fmtDate(d: Date): string {
+    const y = d.getFullYear()
+    const mo = String(d.getMonth() + 1).padStart(2, '0')
+    const da = String(d.getDate()).padStart(2, '0')
+    const h = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    const s = String(d.getSeconds()).padStart(2, '0')
+    return `${y}-${mo}-${da}_${h}${mi}${s}`
+  }
+
   const CONCURRENCY = 5;
   const createdPhotoIds: string[] = [];
 
@@ -128,28 +143,35 @@ async function run(input: UploadWorkerInput) {
     if (!photoDate) {
       photoDate = fs.statSync(file.path).mtime;
     }
-    const timestamp = photoDate.getTime();
-    const fullKey = `uploads/${userId}/${timestamp}-${file.filename}`;
+
+    const year = photoDate.getFullYear()
+    const month = MONTHS[photoDate.getMonth()]
+    const dateStr = fmtDate(photoDate)
+
     const isVideo = file.mimeType.startsWith('video/');
 
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: fullKey,
-        Body: buffer,
-        ContentType: file.mimeType,
-      }),
-    );
-
-    const url = r2Endpoint
-      ? `${r2Endpoint}/${bucket}/${fullKey}`
-      : `https://${bucket}.s3.${region}.amazonaws.com/${fullKey}`;
-
-    let videoThumbKey: string | undefined;
-
     if (isVideo) {
-      const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}.jpg`;
+      const ext = path.extname(file.filename).toLowerCase()
+      const videoKey = `videos/${userId}/${year}/${month}/${dateStr}${ext}`
+      const thumbKey = `thumbs/${userId}/videos/${year}/${month}/${dateStr}.jpg`
       const thumbPath = file.path + '-thumb.jpg';
+
+      // Upload original video
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: videoKey,
+          Body: buffer,
+          ContentType: file.mimeType,
+        }),
+      );
+
+      const url = r2Endpoint
+        ? `${r2Endpoint}/${bucket}/${videoKey}`
+        : `https://${bucket}.s3.${region}.amazonaws.com/${videoKey}`;
+
+      let videoThumbKey: string | undefined;
+
       try {
         let ffmpegPath: string | null = null;
         try {
@@ -211,7 +233,7 @@ async function run(input: UploadWorkerInput) {
 
       const created = await prisma.photo.create({
         data: {
-          s3Key: fullKey,
+          s3Key: videoKey,
           thumbS3Key: videoThumbKey,
           url,
           filename: file.filename,
@@ -223,7 +245,7 @@ async function run(input: UploadWorkerInput) {
       });
       createdPhotoIds.push(created.id);
     } else {
-      const thumbKey = `thumbnails/${userId}/${timestamp}-${file.filename}`;
+      const thumbKey = `thumbs/${userId}/fotos/${year}/${month}/${dateStr}.jpg`;
       const thumbBuffer = await sharp(buffer)
         .resize(THUMB_RESIZE)
         .jpeg({ quality: THUMB_QUALITY })
@@ -238,7 +260,7 @@ async function run(input: UploadWorkerInput) {
         }),
       );
 
-      const largeKey = `large/${userId}/${timestamp}-${file.filename}`;
+      const largeKey = `fotos/${userId}/${year}/${month}/${dateStr}.jpg`;
       const largeBuffer = await sharp(buffer)
         .resize(LARGE_RESIZE, LARGE_RESIZE, {
           fit: 'inside',
@@ -256,11 +278,15 @@ async function run(input: UploadWorkerInput) {
         }),
       );
 
+      const url = r2Endpoint
+        ? `${r2Endpoint}/${bucket}/${largeKey}`
+        : `https://${bucket}.s3.${region}.amazonaws.com/${largeKey}`;
+
       const perceptualHash = await computePerceptualHash(buffer);
 
       const created = await prisma.photo.create({
         data: {
-          s3Key: fullKey,
+          s3Key: largeKey,
           thumbS3Key: thumbKey,
           largeS3Key: largeKey,
           url,

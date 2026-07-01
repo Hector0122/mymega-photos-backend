@@ -3,7 +3,7 @@ export const PRESIGN_EXPIRY = 3600;
 export const THUMB_RESIZE = 300;
 export const THUMB_QUALITY = 70;
 
-export const LARGE_RESIZE = 1920;
+export const LARGE_RESIZE = 2048;
 export const LARGE_QUALITY = 85;
 
 export const ALLOWED_MIMES = [
