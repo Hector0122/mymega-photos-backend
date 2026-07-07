@@ -739,6 +739,21 @@ export class PhotosService implements OnModuleInit {
     });
   }
 
+  private resolveS3Key(
+    storedKey: string | null,
+    fallbackKey: string,
+    prefix: 'uploads' | 'thumbnails' | 'large',
+  ): string {
+    if (storedKey) {
+      if (storedKey.includes('/')) return storedKey
+      return `${prefix}/${storedKey}`
+    }
+    if (fallbackKey.includes('/')) {
+      return fallbackKey.replace(/^uploads\//, `${prefix}/`)
+    }
+    return `${prefix}/${fallbackKey}`
+  }
+
   async getTrash(userId: string, cursor?: string, maxKeys: number = 50) {
     const bucket = getBucketName();
 
@@ -751,11 +766,22 @@ export class PhotosService implements OnModuleInit {
 
     const results = await Promise.all(
       photos.map(async (photo) => {
-        const thumbKey = photo.thumbS3Key;
-        const largeKey = photo.largeS3Key;
+        const thumbKey = this.resolveS3Key(
+          photo.thumbS3Key,
+          photo.s3Key,
+          'thumbnails',
+        )
+        const fullKey = this.resolveS3Key(
+          photo.s3Key,
+          photo.s3Key,
+          'uploads',
+        )
+        const largeKey = photo.largeS3Key
+          ? this.resolveS3Key(photo.largeS3Key, photo.s3Key, 'large')
+          : null
         const [uri, fullUri, largeUri] = await Promise.all([
-          this.getPresignedUrl(bucket, thumbKey || photo.s3Key, PRESIGN_EXPIRY),
-          this.getPresignedUrl(bucket, photo.s3Key, PRESIGN_EXPIRY),
+          this.getPresignedUrl(bucket, thumbKey, PRESIGN_EXPIRY),
+          this.getPresignedUrl(bucket, fullKey, PRESIGN_EXPIRY),
           largeKey
             ? this.getPresignedUrl(bucket, largeKey, PRESIGN_EXPIRY)
             : Promise.resolve(null),
@@ -786,8 +812,14 @@ export class PhotosService implements OnModuleInit {
     if (!photo || photo.userId !== userId || !photo.deletedAt)
       throw new NotFoundException();
 
-    const s3Keys = [photo.s3Key];
-    if (photo.thumbS3Key) s3Keys.push(photo.thumbS3Key);
+    const s3Keys = [
+      this.resolveS3Key(photo.s3Key, photo.s3Key, 'uploads'),
+    ];
+    if (photo.thumbS3Key || photo.s3Key) {
+      s3Keys.push(
+        this.resolveS3Key(photo.thumbS3Key, photo.s3Key, 'thumbnails'),
+      );
+    }
 
     await Promise.allSettled(
       s3Keys.map((key) =>
@@ -809,8 +841,10 @@ export class PhotosService implements OnModuleInit {
     if (all.length === 0) return { deleted: 0 };
 
     const s3Keys = all.flatMap((p) => {
-      const keys = [p.s3Key];
-      if (p.thumbS3Key) keys.push(p.thumbS3Key);
+      const keys = [
+        this.resolveS3Key(p.s3Key, p.s3Key, 'uploads'),
+        this.resolveS3Key(p.thumbS3Key, p.s3Key, 'thumbnails'),
+      ];
       return keys;
     });
 
@@ -836,8 +870,10 @@ export class PhotosService implements OnModuleInit {
     if (trash.length === 0) return { deleted: 0 };
 
     const s3Keys = trash.flatMap((p) => {
-      const keys = [p.s3Key];
-      if (p.thumbS3Key) keys.push(p.thumbS3Key);
+      const keys = [
+        this.resolveS3Key(p.s3Key, p.s3Key, 'uploads'),
+        this.resolveS3Key(p.thumbS3Key, p.s3Key, 'thumbnails'),
+      ];
       return keys;
     });
 

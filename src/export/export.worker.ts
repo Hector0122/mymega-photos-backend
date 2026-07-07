@@ -96,17 +96,18 @@ async function run(input: ExportWorkerInput) {
   });
 
   sendProgress(photos.length, photos.length, `Subiendo ZIP…`);
-  const zipBuffer = fs.readFileSync(tmpPath);
-  fs.unlinkSync(tmpPath);
+  const zipStream = fs.createReadStream(tmpPath);
 
   await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: zipKey,
-      Body: zipBuffer,
+      Body: zipStream,
       ContentType: 'application/zip',
     }),
   );
+
+  fs.unlinkSync(tmpPath);
 
   const downloadUrl = await getSignedUrl(
     s3,
