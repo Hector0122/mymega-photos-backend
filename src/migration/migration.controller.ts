@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -28,8 +29,14 @@ export class MigrationController {
 
   @Post('photos/sync-s3')
   @HttpCode(HttpStatus.OK)
-  async syncS3(@CurrentUser() user: { id: string }) {
-    return this.migrationService.syncS3ToDb(user.id);
+  async syncS3(
+    @CurrentUser() user: { id: string },
+    @Query('limit') limit?: string,
+  ) {
+    return this.migrationService.syncS3ToDb(
+      user.id,
+      limit ? parseInt(limit, 10) : undefined,
+    );
   }
 
   @Post('photos/fix-video-thumbnails')
