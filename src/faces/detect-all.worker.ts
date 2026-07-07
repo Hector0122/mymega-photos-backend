@@ -33,8 +33,9 @@ function runDetection(imagePath: string): Promise<
 > {
   return new Promise((resolve) => {
     const scriptPath = path.join(
-      process.cwd(),
-      'src',
+      __dirname,
+      '..',
+      '..',
       'faces',
       'face-detect.mjs',
     );

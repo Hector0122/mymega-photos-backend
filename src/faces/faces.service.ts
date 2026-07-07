@@ -30,14 +30,14 @@ export class FacesService implements OnModuleInit {
   private scanJobs = new Map<
     string,
     {
-      status: 'running' | 'completed' | 'stopped'
-      total: number
-      processed: number
-      facesFound: number
-      failed: number
-      worker?: Worker
+      status: 'running' | 'completed' | 'stopped';
+      total: number;
+      processed: number;
+      facesFound: number;
+      failed: number;
+      worker?: Worker;
     }
-  >()
+  >();
 
   constructor(
     private prisma: PrismaService,
@@ -107,8 +107,9 @@ export class FacesService implements OnModuleInit {
   ): Promise<{ faces: DetectedFace[]; stderr: string }> {
     return new Promise((resolve) => {
       const scriptPath = path.join(
-        process.cwd(),
-        'src',
+        __dirname,
+        '..',
+        '..',
         'faces',
         'face-detect.mjs',
       );
@@ -357,104 +358,116 @@ export class FacesService implements OnModuleInit {
     userId: string,
   ): Promise<{ jobId: string; total: number; status: string }> {
     const photos = await this.prisma.photo.findMany({
-      where: { userId, deletedAt: null, mimeType: { not: { startsWith: 'video/' } } },
+      where: {
+        userId,
+        deletedAt: null,
+        mimeType: { not: { startsWith: 'video/' } },
+      },
       select: { id: true, _count: { select: { faces: true } } },
-    })
+    });
 
-    const photoIds = photos.filter((p) => p._count.faces === 0).map((p) => p.id)
+    const photoIds = photos
+      .filter((p) => p._count.faces === 0)
+      .map((p) => p.id);
 
     if (photoIds.length === 0) {
-      return { jobId: '', total: 0, status: 'nothing_to_scan' }
+      return { jobId: '', total: 0, status: 'nothing_to_scan' };
     }
 
-    const jobId = `scan_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const jobId = `scan_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     this.scanJobs.set(jobId, {
       status: 'running',
       total: photoIds.length,
       processed: 0,
       facesFound: 0,
       failed: 0,
-    })
+    });
 
     const worker = new Worker(path.join(__dirname, 'detect-all.worker.js'), {
       workerData: { userId, photoIds, concurrency: FACE_DETECT_CONCURRENCY },
-    })
+    });
 
-    const job = this.scanJobs.get(jobId)!
-    job.worker = worker
+    const job = this.scanJobs.get(jobId)!;
+    job.worker = worker;
 
     worker.on('message', (msg: any) => {
-      const j = this.scanJobs.get(jobId)
-      if (!j) return
+      const j = this.scanJobs.get(jobId);
+      if (!j) return;
       if (msg.type === 'progress') {
-        j.processed = msg.processed
-        j.facesFound = msg.facesFound
-        j.failed = msg.failed
+        j.processed = msg.processed;
+        j.facesFound = msg.facesFound;
+        j.failed = msg.failed;
       } else if (msg.type === 'done') {
-        j.status = 'completed'
-        j.processed = msg.processed
-        j.facesFound = msg.facesFound
-        j.failed = msg.failed
-        j.worker = undefined
+        j.status = 'completed';
+        j.processed = msg.processed;
+        j.facesFound = msg.facesFound;
+        j.failed = msg.failed;
+        j.worker = undefined;
       }
-    })
+    });
 
     worker.on('error', () => {
-      const j = this.scanJobs.get(jobId)
+      const j = this.scanJobs.get(jobId);
       if (j) {
-        j.status = 'stopped'
-        j.worker = undefined
+        j.status = 'stopped';
+        j.worker = undefined;
       }
-    })
+    });
 
     worker.on('exit', () => {
-      const j = this.scanJobs.get(jobId)
+      const j = this.scanJobs.get(jobId);
       if (j && j.status === 'running') {
-        j.status = 'stopped'
-        j.worker = undefined
+        j.status = 'stopped';
+        j.worker = undefined;
       }
-    })
+    });
 
-    return { jobId, total: photoIds.length, status: 'started' }
+    return { jobId, total: photoIds.length, status: 'started' };
   }
 
   getDetectProgress(jobId: string): {
-    status: string
-    total: number
-    processed: number
-    facesFound: number
-    failed: number
+    status: string;
+    total: number;
+    processed: number;
+    facesFound: number;
+    failed: number;
   } | null {
-    const job = this.scanJobs.get(jobId)
-    if (!job) return null
+    const job = this.scanJobs.get(jobId);
+    if (!job) return null;
     return {
       status: job.status,
       total: job.total,
       processed: job.processed,
       facesFound: job.facesFound,
       failed: job.failed,
-    }
+    };
   }
 
   stopDetectAll(jobId: string): boolean {
-    const job = this.scanJobs.get(jobId)
-    if (!job || job.status !== 'running') return false
-    job.status = 'stopped'
+    const job = this.scanJobs.get(jobId);
+    if (!job || job.status !== 'running') return false;
+    job.status = 'stopped';
     if (job.worker) {
-      job.worker.terminate()
-      job.worker = undefined
+      job.worker.terminate();
+      job.worker = undefined;
     }
-    return true
+    return true;
   }
 
-  async getDetectStatus(userId: string): Promise<{ total: number; pending: number; detected: number }> {
+  async getDetectStatus(
+    userId: string,
+  ): Promise<{ total: number; pending: number; detected: number }> {
     const photos = await this.prisma.photo.findMany({
-      where: { userId, deletedAt: null, mimeType: { not: { startsWith: 'video/' } } },
+      where: {
+        userId,
+        deletedAt: null,
+        mimeType: { not: { startsWith: 'video/' } },
+      },
       select: { id: true, _count: { select: { faces: true } } },
-    })
-    const total = photos.length
-    const detected = photos.filter((p) => p._count.faces > 0).length
-    return { total, pending: total - detected, detected }
+    });
+    const total = photos.length;
+    const detected = photos.filter((p) => p._count.faces > 0).length;
+    return { total, pending: total - detected, detected };
   }
 
   async getPeople(userId: string): Promise<
@@ -528,9 +541,7 @@ export class FacesService implements OnModuleInit {
     ).then((results) => results.sort((a, b) => b.photoCount - a.photoCount));
   }
 
-  async getUnconfirmed(
-    userId: string,
-  ): Promise<
+  async getUnconfirmed(userId: string): Promise<
     {
       id: string;
       photoId: string;
