@@ -22,6 +22,18 @@ function euclideanDistance(a: number[], b: number[]): number {
   return Math.sqrt(sum);
 }
 
+function resolveScriptPath(): string {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'faces', 'face-detect.mjs'),
+    path.join(process.cwd(), 'dist', 'faces', 'face-detect.mjs'),
+    path.join(process.cwd(), 'src', 'faces', 'face-detect.mjs'),
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p
+  }
+  return candidates[0]
+}
+
 function runDetection(imagePath: string): Promise<
   {
     encoding: number[];
@@ -32,13 +44,7 @@ function runDetection(imagePath: string): Promise<
   }[]
 > {
   return new Promise((resolve) => {
-    const scriptPath = path.join(
-      __dirname,
-      '..',
-      '..',
-      'faces',
-      'face-detect.mjs',
-    );
+    const scriptPath = resolveScriptPath();
 
     const proc = spawn('node', [scriptPath, imagePath], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -56,13 +62,14 @@ function runDetection(imagePath: string): Promise<
       stderr += data.toString();
     });
 
-    proc.on('error', () => {
+    proc.on('error', (err) => {
+      console.error(`runDetection spawn error: ${err.message}, scriptPath: ${scriptPath}`);
       resolve([]);
     });
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        console.error(`face-detect.mjs exited with code ${code}: ${stderr}`);
+        console.error(`face-detect.mjs exited code ${code}, stderr: ${stderr}, scriptPath: ${scriptPath}`);
         resolve([]);
         return;
       }
@@ -93,6 +100,10 @@ async function downloadFromS3(
 }
 
 async function run(input: WorkerInput): Promise<void> {
+  console.log(`[scan-worker] Starting scan for ${input.photoIds.length} photos`)
+  console.log(`[scan-worker] face-detect.mjs path: ${resolveScriptPath()}`)
+  console.log(`[scan-worker] __dirname: ${__dirname}`)
+  console.log(`[scan-worker] cwd: ${process.cwd()}`)
   const prisma = new PrismaClient();
   const r2Endpoint = process.env.R2_ACCOUNT_ID
     ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`

@@ -102,17 +102,23 @@ export class FacesService implements OnModuleInit {
     return Buffer.concat(chunks);
   }
 
+  private resolveScriptPath(): string {
+    const candidates = [
+      path.join(__dirname, '..', '..', 'faces', 'face-detect.mjs'),
+      path.join(process.cwd(), 'dist', 'faces', 'face-detect.mjs'),
+      path.join(process.cwd(), 'src', 'faces', 'face-detect.mjs'),
+    ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return p
+    }
+    return candidates[0]
+  }
+
   private runDetection(
     imagePath: string,
   ): Promise<{ faces: DetectedFace[]; stderr: string }> {
     return new Promise((resolve) => {
-      const scriptPath = path.join(
-        __dirname,
-        '..',
-        '..',
-        'faces',
-        'face-detect.mjs',
-      );
+      const scriptPath = this.resolveScriptPath();
 
       const proc = spawn('node', [scriptPath, imagePath], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -131,13 +137,13 @@ export class FacesService implements OnModuleInit {
       });
 
       proc.on('error', (err) => {
-        resolve({ faces: [], stderr: `spawn error: ${err.message}` });
+        resolve({ faces: [], stderr: `spawn error: ${err.message}, scriptPath: ${scriptPath}` });
       });
 
       proc.on('close', (code) => {
         if (code !== 0) {
           this.logger.warn(
-            `face-detect.mjs exited with code ${code}: ${stderr}`,
+            `face-detect.mjs exited with code ${code}: ${stderr}, scriptPath: ${scriptPath}`,
           );
         }
         try {
