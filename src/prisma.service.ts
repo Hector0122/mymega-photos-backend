@@ -3,11 +3,13 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 function normalizeConnectionString(raw: string): string {
-  if (!raw.includes('sslmode=')) {
-    const sep = raw.includes('?') ? '&' : '?';
-    return `${raw}${sep}sslmode=verify-full`;
+  if (raw.includes('sslmode=')) return raw;
+  const sep = raw.includes('?') ? '&' : '?';
+  // Railway internal PostgreSQL does not use TLS
+  if (raw.includes('railway.internal')) {
+    return `${raw}${sep}sslmode=disable`;
   }
-  return raw;
+  return `${raw}${sep}sslmode=require`;
 }
 
 @Injectable()
