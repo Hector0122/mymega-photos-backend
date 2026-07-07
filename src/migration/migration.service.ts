@@ -28,13 +28,13 @@ export class MigrationService {
     return key.replace('uploads/', '').replace('thumbnails/', '');
   }
 
-  async syncS3ToDb(): Promise<{ synced: number }> {
+  async syncS3ToDb(userId: string): Promise<{ synced: number }> {
     const bucket = getBucketName();
 
-    const demoUser = await this.prisma.user.findUnique({
-      where: { email: 'demo@vaulta.app' },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
     });
-    if (!demoUser) throw new Error('Default user (demo@vaulta.app) not found');
+    if (!user) throw new Error('User not found');
 
     let continuationToken: string | undefined;
     let synced = 0;
@@ -83,7 +83,7 @@ export class MigrationService {
             mimeType: 'image/jpeg',
             size,
             createdAt,
-            userId: demoUser.id,
+            userId: user.id,
           },
         });
         synced++;

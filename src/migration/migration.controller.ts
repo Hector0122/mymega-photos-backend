@@ -28,8 +28,8 @@ export class MigrationController {
 
   @Post('photos/sync-s3')
   @HttpCode(HttpStatus.OK)
-  async syncS3() {
-    return this.migrationService.syncS3ToDb();
+  async syncS3(@CurrentUser() user: { id: string }) {
+    return this.migrationService.syncS3ToDb(user.id);
   }
 
   @Post('photos/fix-video-thumbnails')
