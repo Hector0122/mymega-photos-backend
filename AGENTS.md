@@ -185,6 +185,15 @@ adb reverse tcp:3000 tcp:3000
 - **Todos los bugs solventados**: ffmpeg en Railway, pantalla negra offline, auto-delete papelera, 401 en stream download
 - **Nuevos scripts**: `scripts/` — bulk-upload, clean-dups, clean-r2, count-r2, db-r2-diff
 - **Reconocimiento facial**: Detección de caras con face-api + sharp, descriptor FaceNet 128-dim, agrupación euclidiana, modelo `Face` en Prisma, auto-detección al subir fotos, People Browser UI, búsqueda/filtro por persona, memorias por persona, stats faciales
+- **Quitar cara de foto**: `DELETE /faces/by-photo/:photoId?person=:name` — elimina una cara específica de una foto sin borrar la foto
+- **Respuesta album photos**: `GET /albums/:id/photos` devuelve `{ photos: [...], nextToken }` (objeto envuelto con paginación), no array plano
+- **Grid unificado**: PersonView, AlbumView y find-more modal usan el mismo patrón de grid — manual rows + `flex:1` + `aspectRatio:1` + `overflow:hidden`
+- **AlbumView fix**: frontend ahora parsea correctamente `{ photos }` en vez de esperar array plano
+- **People card redesign**: thumbnail 56px, sombra/elevación, sin borde ni chevron, botón de búsqueda sin background tint
+- **Multi-tag modal**: input de chips para asignar múltiples nombres a una cara, sin diálogo de confirmación
+- **Navegación desde caras no confirmadas**: thumbnail en People → PhotoPreview
+- **Find-more selección**: checkboxes individuales, badge de distancia, toolbar "Seleccionar todas/Deseleccionar"
+- **PhotoPreview blur fix**: `setImageReady(true)` al cargar fotos desde PersonView
 
 ## Scripts (`scripts/`)
 
