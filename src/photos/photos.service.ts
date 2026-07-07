@@ -432,18 +432,31 @@ export class PhotosService implements OnModuleInit {
     userId: string,
     photoId: string,
     tag: string,
-  ): Promise<string[]> {
+  ): Promise<{ tags: string[]; linkedPerson: string | null }> {
     const photo = await this.findOwnedPhoto(photoId, userId);
 
     const normalized = tag.trim().toLowerCase();
-    if (!normalized) return photo.tags;
-    if (photo.tags.includes(normalized)) return photo.tags;
+    if (!normalized) return { tags: photo.tags, linkedPerson: null };
+    if (photo.tags.includes(normalized)) return { tags: photo.tags, linkedPerson: null };
 
     const updated = await this.prisma.photo.update({
       where: { id: photoId },
       data: { tags: { push: normalized } },
     });
-    return updated.tags;
+
+    const personExists = await this.prisma.face.findFirst({
+      where: {
+        photo: { userId },
+        personName: normalized,
+        confirmed: true,
+        ignored: false,
+      },
+    });
+
+    return {
+      tags: updated.tags,
+      linkedPerson: personExists ? normalized : null,
+    };
   }
 
   async removeTag(

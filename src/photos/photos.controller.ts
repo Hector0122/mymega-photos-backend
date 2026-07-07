@@ -290,8 +290,8 @@ export class PhotosController {
     const sanitized = sanitize(tag, 50);
     if (!sanitized)
       throw new BadRequestException('tag is empty after sanitization');
-    const tags = await this.photosService.addTag(user.id, id, sanitized);
-    return { tags };
+    const result = await this.photosService.addTag(user.id, id, sanitized);
+    return { tags: result.tags, linkedPerson: result.linkedPerson };
   }
 
   @Delete('photos/:id/tags')

@@ -455,7 +455,14 @@ export class FacesService implements OnModuleInit {
 
   async getUnconfirmed(
     userId: string,
-  ): Promise<{ id: string; photoId: string; photoUri: string | null }[]> {
+  ): Promise<
+    {
+      id: string;
+      photoId: string;
+      photoUri: string | null;
+      suggestions: { personName: string; distance: number }[];
+    }[]
+  > {
     const faces = await this.prisma.face.findMany({
       where: {
         photo: { userId, deletedAt: null },
@@ -465,11 +472,31 @@ export class FacesService implements OnModuleInit {
       select: {
         id: true,
         photoId: true,
+        encoding: true,
         photo: { select: { id: true, thumbS3Key: true, s3Key: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
+
+    const confirmedFaces = await this.prisma.face.findMany({
+      where: {
+        photo: { userId, deletedAt: null },
+        personName: { not: null },
+        confirmed: true,
+        ignored: false,
+      },
+      select: { personName: true, encoding: true },
+      take: 2000,
+    });
+
+    const personEncodings = new Map<string, number[][]>();
+    for (const f of confirmedFaces) {
+      if (!f.personName) continue;
+      const encs = personEncodings.get(f.personName) || [];
+      encs.push(f.encoding as number[]);
+      personEncodings.set(f.personName, encs);
+    }
 
     const bucket =
       process.env.R2_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
@@ -477,13 +504,30 @@ export class FacesService implements OnModuleInit {
     const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
     const results = await Promise.all(
       faces.map(async (f) => {
+        const encoding = f.encoding as number[];
+        const allSuggestions: { personName: string; distance: number }[] = [];
+
+        for (const [name, encs] of personEncodings) {
+          let minDist = Infinity;
+          for (const refEnc of encs) {
+            const dist = this.euclideanDistance(encoding, refEnc);
+            if (dist < minDist) minDist = dist;
+          }
+          if (minDist < MATCH_THRESHOLD) {
+            allSuggestions.push({ personName: name, distance: minDist });
+          }
+        }
+
+        allSuggestions.sort((a, b) => a.distance - b.distance);
+        const suggestions = allSuggestions.slice(0, 3);
+
         const thumbKey = f.photo.thumbS3Key || f.photo.s3Key;
         const uri = await getSignedUrl(
           this.s3,
           new GetObjectCommand({ Bucket: bucket, Key: thumbKey }),
           { expiresIn: 604800 },
         );
-        return { id: f.id, photoId: f.photoId, photoUri: uri };
+        return { id: f.id, photoId: f.photoId, photoUri: uri, suggestions };
       }),
     );
 
@@ -673,12 +717,12 @@ export class FacesService implements OnModuleInit {
   ) {
     const face = await this.prisma.face.findUnique({
       where: { id: faceId },
-      select: { id: true, photo: { select: { userId: true } } },
+      select: { id: true, photo: { select: { userId: true, id: true } } },
     });
 
     if (!face || face.photo.userId !== userId) return null;
 
-    return this.prisma.face.update({
+    const updated = await this.prisma.face.update({
       where: { id: faceId },
       data: {
         ...(data.personName !== undefined
@@ -688,6 +732,20 @@ export class FacesService implements OnModuleInit {
         ...(data.ignored !== undefined ? { ignored: data.ignored } : {}),
       },
     });
+
+    let suggestedTag: string | null = null;
+    if (data.confirmed && data.personName) {
+      const photo = await this.prisma.photo.findUnique({
+        where: { id: face.photo.id },
+        select: { tags: true },
+      });
+      const normalized = data.personName.trim().toLowerCase();
+      if (photo && !photo.tags.includes(normalized)) {
+        suggestedTag = normalized;
+      }
+    }
+
+    return { ...updated, suggestedTag };
   }
 
   async deleteFace(faceId: string, userId: string) {
