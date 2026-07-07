@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'worker_threads';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -104,7 +105,15 @@ async function run(input: WorkerInput): Promise<void> {
   console.log(`[scan-worker] face-detect.mjs path: ${resolveScriptPath()}`)
   console.log(`[scan-worker] __dirname: ${__dirname}`)
   console.log(`[scan-worker] cwd: ${process.cwd()}`)
-  const prisma = new PrismaClient();
+  const rawUrl = process.env.DATABASE_URL || '';
+  const connectionString = rawUrl.includes('sslmode=')
+    ? rawUrl
+    : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=verify-full`;
+  const adapter = new PrismaPg(
+    { connectionString },
+    { schema: process.env.DATABASE_SCHEMA || 'public' },
+  );
+  const prisma = new PrismaClient({ adapter });
   const r2Endpoint = process.env.R2_ACCOUNT_ID
     ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
     : undefined;
