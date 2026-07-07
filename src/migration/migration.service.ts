@@ -8,7 +8,6 @@ import {
   CopyObjectCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import exifr from 'exifr';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma.service';
@@ -30,7 +29,10 @@ export class MigrationService {
     return key.replace('uploads/', '').replace('thumbnails/', '');
   }
 
-  async syncS3ToDb(userId: string, limit?: number): Promise<{ synced: number }> {
+  async syncS3ToDb(
+    userId: string,
+    limit?: number,
+  ): Promise<{ synced: number }> {
     const bucket = getBucketName();
 
     const user = await this.prisma.user.findUnique({
@@ -74,31 +76,49 @@ export class MigrationService {
 
         // Detectar tipo MIME por extensión
         const ext = key.split('.').pop()?.toLowerCase() || 'jpg';
-        const mimeType = ext === 'mp4' ? 'video/mp4'
-          : ext === 'heic' ? 'image/heic'
-          : ext === 'mov' ? 'video/quicktime'
-          : ext === 'png' ? 'image/png'
-          : ext === 'gif' ? 'image/gif'
-          : ext === 'webp' ? 'image/webp'
-          : 'image/jpeg';
+        const mimeType =
+          ext === 'mp4'
+            ? 'video/mp4'
+            : ext === 'heic'
+              ? 'image/heic'
+              : ext === 'mov'
+                ? 'video/quicktime'
+                : ext === 'png'
+                  ? 'image/png'
+                  : ext === 'gif'
+                    ? 'image/gif'
+                    : ext === 'webp'
+                      ? 'image/webp'
+                      : 'image/jpeg';
 
-        // Extraer fecha EXIF (DateTimeOriginal) con fallback a lastModified
-        let createdAt = lastModified || new Date();
+        // Extraer fecha EXIF con fallback a fecha del path y lastModified
+        let createdAt: Date | null = null;
         try {
-          const presigned = await getSignedUrl(this.s3, new GetObjectCommand({
-            Bucket: bucket,
-            Key: key,
-            Range: 'bytes=0-65536',
-          }), { expiresIn: 60 });
-          const resp = await fetch(presigned);
-          if (resp.ok) {
-            const buf = Buffer.from(await resp.arrayBuffer());
-            const exif = await exifr.parse(buf, ['DateTimeOriginal']);
-            if (exif?.DateTimeOriginal) {
-              createdAt = new Date(exif.DateTimeOriginal);
-            }
+          const obj = await this.s3.send(
+            new GetObjectCommand({
+              Bucket: bucket,
+              Key: key,
+              Range: 'bytes=0-65536',
+            }),
+          );
+          const buf = Buffer.from(await obj.Body!.transformToByteArray());
+          const exif = await exifr.parse(buf, ['DateTimeOriginal']);
+          if (exif?.DateTimeOriginal) {
+            createdAt = new Date(exif.DateTimeOriginal);
           }
-        } catch { /* fallback a lastModified */ }
+        } catch {
+          /* fallback */
+        }
+
+        if (!createdAt || createdAt.getTime() < 946684800000) {
+          // Fallback: fecha desde el path de S3 (ej. 2026-05-15)
+          const m = key.match(/(\d{4}-\d{2}-\d{2})/);
+          if (m) createdAt = new Date(m[1]);
+        }
+
+        if (!createdAt || createdAt.getTime() < 946684800000) {
+          createdAt = lastModified || new Date();
+        }
 
         await this.prisma.photo.create({
           data: {
