@@ -112,7 +112,12 @@ async function run(input: WorkerInput): Promise<void> {
   let processed = 0;
   let facesFound = 0;
   let failed = 0;
+  let stopped = false;
   const total = input.photoIds.length;
+
+  parentPort?.on('message', (msg) => {
+    if (msg === 'stop') stopped = true;
+  });
 
   const { concurrency } = input;
 
@@ -126,7 +131,7 @@ async function run(input: WorkerInput): Promise<void> {
     });
   };
 
-  for (let i = 0; i < total; i += concurrency) {
+  for (let i = 0; i < total && !stopped; i += concurrency) {
     const chunk = input.photoIds.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       chunk.map(async (photoId) => {

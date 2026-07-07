@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  NotFoundException,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -66,6 +67,25 @@ export class FacesController {
   @HttpCode(HttpStatus.OK)
   async detectAll(@CurrentUser() user: { id: string }) {
     return this.facesService.detectAll(user.id);
+  }
+
+  @Get('detect-status')
+  async getDetectStatus(@CurrentUser() user: { id: string }) {
+    return this.facesService.getDetectStatus(user.id);
+  }
+
+  @Get('detect-progress/:jobId')
+  async getDetectProgress(@Param('jobId') jobId: string) {
+    const progress = this.facesService.getDetectProgress(jobId);
+    if (!progress) throw new NotFoundException('Job not found');
+    return progress;
+  }
+
+  @Post('detect-stop')
+  @HttpCode(HttpStatus.OK)
+  async stopDetectAll(@Body('jobId') jobId: string) {
+    const stopped = this.facesService.stopDetectAll(jobId);
+    return { stopped };
   }
 
   @Get('unconfirmed')
