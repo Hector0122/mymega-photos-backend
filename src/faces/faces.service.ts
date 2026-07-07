@@ -409,6 +409,11 @@ export class FacesService implements OnModuleInit {
         j.facesFound = msg.facesFound;
         j.failed = msg.failed;
         j.worker = undefined;
+      } else if (msg.type === 'error') {
+        this.logger.error(`Scan worker error: ${msg.message}`);
+        if (msg.stack) this.logger.error(msg.stack);
+        j.status = 'stopped';
+        j.worker = undefined;
       }
     });
 

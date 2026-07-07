@@ -247,5 +247,7 @@ async function run(input: WorkerInput): Promise<void> {
 }
 
 run(workerData as WorkerInput).catch((err: Error) => {
-  parentPort?.postMessage({ type: 'error', message: err.message });
+  console.error(`[scan-worker] Unhandled error: ${err.message}`);
+  console.error(err.stack);
+  parentPort?.postMessage({ type: 'error', message: err.message, stack: err.stack });
 });
