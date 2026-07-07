@@ -68,10 +68,16 @@ TOKEN=$(curl -s -X POST $BACKEND_URL/auth/login \
 
 curl -X POST "$BACKEND_URL/faces/detect-all" \
   -H "Authorization: Bearer $TOKEN"
+
+# El endpoint ahora retorna { jobId, total, status } inmediatamente.
+# Monitorear progreso:
+curl "$BACKEND_URL/faces/detect-progress/$JOB_ID" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-Esto corre en un **worker thread** separado (no bloquea el event loop) y procesa
-5 fotos en paralelo. Cada foto:
+Esto lanza un **worker thread** separado y retorna inmediatamente un `jobId`. El frontend hace polling cada 3s a `GET /faces/detect-progress/:jobId` para ver el progreso.
+
+El worker procesa 5 fotos en paralelo. Cada foto:
 1. Se descarga de R2 a `/tmp`
 2. Se pasa a `face-detect.mjs` (child process con `@vladmandic/face-api`)
 3. Se guardan los descriptores (128‑dim) en la DB
@@ -103,7 +109,7 @@ for ((lote=1; lote<=TOTAL_GB/LOTE_GB; lote++)); do
   # Detectar caras
   TOKEN=$(curl -s -X POST $BACKEND_URL/auth/login ... | jq -r '.token')
   curl -X POST "$BACKEND_URL/faces/detect-all" \
-    -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
   # Monitorear progreso (opcional)
   echo "Lote $lote completado. Esperando 5 min antes del siguiente..."
@@ -121,7 +127,7 @@ done
 | Índice en `Face.createdAt` | `schema.prisma` + migración | Evita sort en memoria en `getPeople` |
 | Worker thread en `findMoreFaces` | `find-more.worker.ts` | Comparación de descriptores fuera del event loop |
 | Batches de 500 en `findMoreFaces` | `faces.service.ts` | Reduce memoria: 500 caras por lote en vez de todas |
-| Worker thread en `detect-all` | `detect-all.worker.ts` | Detección facial completa en hilo separado |
+| Worker thread en `detect-all` | `detect-all.worker.ts` | Detección facial async con jobId + progreso + stop. Polling frontend cada 3s |
 | Concurrencia 5 en `detectBatch` | `faces.service.ts` | 5 fotos en paralelo vs 1 por 1 |
 
 ## Límites conocidos

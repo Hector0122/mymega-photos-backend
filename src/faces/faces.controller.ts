@@ -169,6 +169,17 @@ export class FacesController {
     return result;
   }
 
+  @Delete('by-photo/:photoId')
+  @HttpCode(HttpStatus.OK)
+  async deleteFacesByPhoto(
+    @CurrentUser() user: { id: string },
+    @Param('photoId') photoId: string,
+    @Query('person') person?: string,
+  ) {
+    const sanitized = person ? sanitize(person, 50) : undefined;
+    return this.facesService.deleteFacesByPhoto(photoId, user.id, sanitized);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async deleteFace(

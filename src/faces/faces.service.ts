@@ -857,6 +857,22 @@ export class FacesService implements OnModuleInit {
     await this.prisma.face.delete({ where: { id: faceId } });
   }
 
+  async deleteFacesByPhoto(photoId: string, userId: string, personName?: string) {
+    const photo = await this.prisma.photo.findUnique({
+      where: { id: photoId },
+      select: { userId: true },
+    });
+
+    if (!photo || photo.userId !== userId)
+      throw new Error('Photo not found');
+
+    const where: any = { photoId };
+    if (personName) where.personName = personName;
+
+    const { count } = await this.prisma.face.deleteMany({ where });
+    return { deleted: count };
+  }
+
   async confirmAllForPerson(
     userId: string,
     personName: string,

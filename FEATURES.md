@@ -34,10 +34,11 @@
 |---|---------|----------|
 | 22 | **Hash perceptual + detección de duplicados** | `backend/src/common/image-analysis.ts` — `computePerceptualHash` (8×8 dhash); `GET /photos/duplicates` agrupa por hash; `frontend/pages/Duplicates/` |
 | 23 | **Estadísticas** | `backend/src/app.controller.ts` — `GET /photos/stats` devuelve conteo total, álbumes, favoritos |
-| 24 | **Reconocimiento facial** — Detección de caras con face-api + sharp, descriptor Facenet de 128 floats, bounding box, agrupación por distancia euclidiana | `backend/src/faces/faces.service.ts` — detección vía child process (`face-detect.mjs`), auto-detección al subir fotos; `backend/prisma/schema.prisma` — modelo `Face`; `frontend/pages/People/` — People Browser + PersonView + modal nombrar; `frontend/components/FilterBar.tsx` — botón caras; `frontend/pages/Albums/` — entrada Personas; `frontend/pages/Profile/` — stats rostros/personas |
+| 24 | **Reconocimiento facial** — Detección de caras con face-api + sharp, descriptor Facenet de 128 floats, bounding box, agrupación por distancia euclidiana, escaneo en background con progreso | `backend/src/faces/faces.service.ts` — detección vía child process (`face-detect.mjs`), auto-detección al subir fotos, `detectAll()` async con jobId + `getDetectProgress()`/`stopDetectAll()`/`getDetectStatus()`; `backend/prisma/schema.prisma` — modelo `Face`; `frontend/pages/People/` — People Browser + PersonView + modal nombrar + botón "Escanear biblioteca" con progress bar y polling; `frontend/components/FilterBar.tsx` — botón caras; `frontend/pages/Albums/` — entrada Personas; `frontend/pages/Profile/` — stats rostros/personas |
 | 25 | **Búsqueda por persona** | `GET /photos?person=X` filtra Home; `GET /faces/photos?person=X` grid de fotos de una persona |
 | 26 | **Memorias por persona** | `GET /photos/this-day?person=X` recuerdos filtrados por persona |
 | 27 | **Estadísticas faciales** | `GET /faces/stats` total rostros, personas, desglose por persona |
+| 28 | **Escanear biblioteca** — Botón "Escanear biblioteca (X pendientes)" con worker thread en background, progreso en tiempo real (polling cada 3s), barra de progreso + contador de caras, botón detener | `backend/src/faces/faces.service.ts` — `detectAll()` async con jobId, `getDetectProgress()`, `stopDetectAll()`, `getDetectStatus()`; `backend/src/faces/faces.controller.ts` — endpoints `detect-status`, `detect-progress/:jobId`, `detect-stop`; `backend/src/faces/detect-all.worker.ts` — envía progreso periódico, soporta stop signal; `frontend/pages/People/index.tsx` — botón, progress bar, polling, auto-refresh al completar |
 
 ### Utilidades
 | # | Feature | Archivos |
@@ -154,6 +155,10 @@
 | 33 | **401 en stream al descargar/share/offline** — Cabeceras `Authorization` en `RNFS.downloadFile` | `frontend/pages/PhotoPreview/index.tsx`, `frontend/api/offline.ts` |
 | 34 | **Índices de performance** — Migración con índices adicionales | `prisma/migrations/20260520035800_add_performance_indexes/` |
 | 35 | **Device-token upsert** — `findFirst+create/update` evita error composite key en Prisma v7 | `backend/src/firebase/device-token.controller.ts` |
+| 36 | **Worker PrismaClient v7** — `new PrismaClient()` sin adapter falla en worker threads; se necesita `PrismaPg` adapter con connection string explícita | `detect-all.worker.ts` |
+| 37 | **face-detect.mjs path resolution** — Assets config en `nest-cli.json` copia .mjs a `dist/` + multi-path resolution (__dirname + cwd) para Railway | `nest-cli.json`, `detect-all.worker.ts`, `faces.service.ts` |
+| 38 | **Worker error handling** — Manejo de `msg.type === "error"` faltante en service; worker no loggeaba el error. Añadido console.error + service handler | `faces.service.ts`, `detect-all.worker.ts` |
+| 39 | **Escanear biblioteca async** — `detectAll()` cambiado de síncrono (Promise que esperaba worker) a async con jobId + polling + stop | `faces.service.ts`, `faces.controller.ts`, `People/index.tsx`, `client.ts` |
 
 ## 📋 Pendientes / Futuras
 
