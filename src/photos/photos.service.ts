@@ -304,7 +304,7 @@ export class PhotosService implements OnModuleInit {
           ? {
               OR: [
                 { filename: { contains: query, mode: 'insensitive' } },
-                { tags: { has: query } },
+                { tags: { has: query.toLowerCase() } },
               ],
             }
           : {}),
@@ -745,13 +745,13 @@ export class PhotosService implements OnModuleInit {
     prefix: 'uploads' | 'thumbnails' | 'large',
   ): string {
     if (storedKey) {
-      if (storedKey.includes('/')) return storedKey
-      return `${prefix}/${storedKey}`
+      if (storedKey.includes('/')) return storedKey;
+      return `${prefix}/${storedKey}`;
     }
     if (fallbackKey.includes('/')) {
-      return fallbackKey.replace(/^uploads\//, `${prefix}/`)
+      return fallbackKey.replace(/^uploads\//, `${prefix}/`);
     }
-    return `${prefix}/${fallbackKey}`
+    return `${prefix}/${fallbackKey}`;
   }
 
   async getTrash(userId: string, cursor?: string, maxKeys: number = 50) {
@@ -770,15 +770,11 @@ export class PhotosService implements OnModuleInit {
           photo.thumbS3Key,
           photo.s3Key,
           'thumbnails',
-        )
-        const fullKey = this.resolveS3Key(
-          photo.s3Key,
-          photo.s3Key,
-          'uploads',
-        )
+        );
+        const fullKey = this.resolveS3Key(photo.s3Key, photo.s3Key, 'uploads');
         const largeKey = photo.largeS3Key
           ? this.resolveS3Key(photo.largeS3Key, photo.s3Key, 'large')
-          : null
+          : null;
         const [uri, fullUri, largeUri] = await Promise.all([
           this.getPresignedUrl(bucket, thumbKey, PRESIGN_EXPIRY),
           this.getPresignedUrl(bucket, fullKey, PRESIGN_EXPIRY),
@@ -812,9 +808,7 @@ export class PhotosService implements OnModuleInit {
     if (!photo || photo.userId !== userId || !photo.deletedAt)
       throw new NotFoundException();
 
-    const s3Keys = [
-      this.resolveS3Key(photo.s3Key, photo.s3Key, 'uploads'),
-    ];
+    const s3Keys = [this.resolveS3Key(photo.s3Key, photo.s3Key, 'uploads')];
     if (photo.thumbS3Key || photo.s3Key) {
       s3Keys.push(
         this.resolveS3Key(photo.thumbS3Key, photo.s3Key, 'thumbnails'),
