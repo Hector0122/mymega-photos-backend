@@ -395,10 +395,10 @@ async function main() {
   const maxPhotos = opts.maxPhotos || Infinity;
   const take = opts.take || 100;
   dryRun = !!opts.dryRun;
-  const noResume = !!opts.noResume;
+  const noResume = opts.resume === false;
   const resume = noResume
     ? false
-    : !!opts.resume || fs.existsSync(CHECKPOINT_FILE);
+    : opts.resume || fs.existsSync(CHECKPOINT_FILE);
   const additionalMode = resume && maxPhotos !== Infinity;
 
   apiUrl = (process.env.VAULTA_API_URL || '').replace(/\/+$/, '');
@@ -491,6 +491,7 @@ async function main() {
   let failedCount = state.failedIds.length;
   let morePages = true;
   startTime = Date.now();
+  let additionalDone = 0;
 
   const limit = pLimit(concurrency);
 
@@ -518,9 +519,7 @@ async function main() {
     for (const photo of pending.photos) {
       if (state.processedIds.has(photo.id)) continue;
       batch.push(photo);
-      const newlyProcessed =
-        processed - state.totalProcessed + failedCount - state.failedIds.length;
-      if (additionalMode && newlyProcessed + batch.length >= maxPhotos) break;
+      if (additionalMode && additionalDone + batch.length >= maxPhotos) break;
       if (
         !additionalMode &&
         processed + failedCount + batch.length >= maxPhotos
@@ -616,15 +615,14 @@ async function main() {
       );
     }
 
+    additionalDone += batch.length;
+
     page++;
 
     if (additionalMode) {
-      const prevTotal = state.totalProcessed;
-      const prevFailed = state.failedIds.length;
       state.totalProcessed = processed;
       state.totalFaces = facesFound;
-      const newlyDone = processed - prevTotal + failedCount - prevFailed;
-      if (newlyDone >= maxPhotos) morePages = false;
+      if (additionalDone >= maxPhotos) morePages = false;
     } else {
       state.totalProcessed = processed;
       state.totalFaces = facesFound;
