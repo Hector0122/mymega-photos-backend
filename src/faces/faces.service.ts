@@ -40,8 +40,11 @@ export class FacesService implements OnModuleInit {
       facesFound: number;
       failed: number;
       worker?: Worker;
+      userId: string;
     }
   >();
+
+  private activeScanUsers = new Set<string>();
 
   constructor(
     private prisma: PrismaService,
@@ -285,53 +288,59 @@ export class FacesService implements OnModuleInit {
 
     if (faces.length === 0) return 0;
 
-    await this.prisma.face.deleteMany({ where: { photoId } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.face.deleteMany({ where: { photoId } });
 
-    await this.prisma.face.createMany({
-      data: faces.map((f) => ({
-        photoId,
-        encoding: f.encoding,
-        boxX: f.boxX,
-        boxY: f.boxY,
-        boxWidth: f.boxWidth,
-        boxHeight: f.boxHeight,
-      })),
-    });
-
-    const existingNames = await this.prisma.face.findMany({
-      where: { personName: { not: null }, confirmed: true },
-      select: { personName: true, encoding: true },
-      distinct: ['personName'],
-    });
-
-    if (existingNames.length > 0) {
-      const newFaces = await this.prisma.face.findMany({
-        where: { photoId, personName: null, ignored: false },
+      await tx.face.createMany({
+        data: faces.map((f) => ({
+          photoId,
+          encoding: f.encoding,
+          boxX: f.boxX,
+          boxY: f.boxY,
+          boxWidth: f.boxWidth,
+          boxHeight: f.boxHeight,
+        })),
       });
 
-      for (const face of newFaces) {
-        const encoding = face.encoding as number[];
-        let bestMatch = '';
-        let bestDistance = Infinity;
+      const existingNames = await tx.face.findMany({
+        where: {
+          personName: { not: null },
+          confirmed: true,
+          photo: { userId },
+        },
+        select: { personName: true, encoding: true },
+        distinct: ['personName'],
+      });
 
-        for (const existing of existingNames) {
-          if (!existing.personName) continue;
-          const existingEncoding = existing.encoding as number[];
-          const dist = this.euclideanDistance(encoding, existingEncoding);
-          if (dist < MATCH_THRESHOLD && dist < bestDistance) {
-            bestDistance = dist;
-            bestMatch = existing.personName;
+      if (existingNames.length > 0) {
+        const newFaces = await tx.face.findMany({
+          where: { photoId, personName: null, ignored: false },
+        });
+
+        for (const face of newFaces) {
+          const encoding = face.encoding as number[];
+          let bestMatch = '';
+          let bestDistance = Infinity;
+
+          for (const existing of existingNames) {
+            if (!existing.personName) continue;
+            const existingEncoding = existing.encoding as number[];
+            const dist = this.euclideanDistance(encoding, existingEncoding);
+            if (dist < MATCH_THRESHOLD && dist < bestDistance) {
+              bestDistance = dist;
+              bestMatch = existing.personName;
+            }
+          }
+
+          if (bestMatch) {
+            await tx.face.update({
+              where: { id: face.id },
+              data: { personName: bestMatch, confirmed: true },
+            });
           }
         }
-
-        if (bestMatch) {
-          await this.prisma.face.update({
-            where: { id: face.id },
-            data: { personName: bestMatch, confirmed: true },
-          });
-        }
       }
-    }
+    });
 
     return faces.length;
   }
@@ -371,6 +380,10 @@ export class FacesService implements OnModuleInit {
     userId: string,
     limit?: number,
   ): Promise<{ jobId: string; total: number; status: string }> {
+    if (this.activeScanUsers.has(userId)) {
+      return { jobId: '', total: 0, status: 'already_running' };
+    }
+
     let effectiveLimit = limit ?? FACE_DETECT_DEFAULT_LIMIT;
     if (effectiveLimit < 1) effectiveLimit = FACE_DETECT_DEFAULT_LIMIT;
     if (effectiveLimit > FACE_DETECT_MAX_LIMIT)
@@ -402,7 +415,13 @@ export class FacesService implements OnModuleInit {
       processed: 0,
       facesFound: 0,
       failed: 0,
+      userId,
     });
+    this.activeScanUsers.add(userId);
+
+    const releaseLock = () => {
+      this.activeScanUsers.delete(userId);
+    };
 
     const worker = new Worker(path.join(__dirname, 'detect-all.worker.js'), {
       workerData: { userId, photoIds, concurrency: FACE_DETECT_CONCURRENCY },
@@ -424,11 +443,13 @@ export class FacesService implements OnModuleInit {
         j.facesFound = msg.facesFound;
         j.failed = msg.failed;
         j.worker = undefined;
+        releaseLock();
       } else if (msg.type === 'error') {
         this.logger.error(`Scan worker error: ${msg.message}`);
         if (msg.stack) this.logger.error(msg.stack);
         j.status = 'stopped';
         j.worker = undefined;
+        releaseLock();
       }
     });
 
@@ -437,6 +458,7 @@ export class FacesService implements OnModuleInit {
       if (j) {
         j.status = 'stopped';
         j.worker = undefined;
+        releaseLock();
       }
     });
 
@@ -445,6 +467,7 @@ export class FacesService implements OnModuleInit {
       if (j && j.status === 'running') {
         j.status = 'stopped';
         j.worker = undefined;
+        releaseLock();
       }
     });
 
@@ -574,31 +597,33 @@ export class FacesService implements OnModuleInit {
     let facesFound = 0;
 
     for (const result of results) {
-      const photo = await this.prisma.photo.findUnique({
-        where: { id: result.photoId },
-        select: { userId: true },
+      await this.prisma.$transaction(async (tx) => {
+        const photo = await tx.photo.findUnique({
+          where: { id: result.photoId },
+          select: { userId: true },
+        });
+        if (!photo || photo.userId !== userId) return;
+
+        await tx.face.deleteMany({ where: { photoId: result.photoId } });
+
+        if (result.faces.length === 0) return;
+
+        await tx.face.createMany({
+          data: result.faces.map((f) => ({
+            photoId: result.photoId,
+            encoding: f.encoding,
+            boxX: f.boxX,
+            boxY: f.boxY,
+            boxWidth: f.boxWidth,
+            boxHeight: f.boxHeight,
+            personName: f.personName || null,
+            confirmed: !!f.personName,
+          })),
+        });
+
+        processed++;
+        facesFound += result.faces.length;
       });
-      if (!photo || photo.userId !== userId) continue;
-
-      await this.prisma.face.deleteMany({ where: { photoId: result.photoId } });
-
-      if (result.faces.length === 0) continue;
-
-      await this.prisma.face.createMany({
-        data: result.faces.map((f) => ({
-          photoId: result.photoId,
-          encoding: f.encoding,
-          boxX: f.boxX,
-          boxY: f.boxY,
-          boxWidth: f.boxWidth,
-          boxHeight: f.boxHeight,
-          personName: f.personName || null,
-          confirmed: !!f.personName,
-        })),
-      });
-
-      processed++;
-      facesFound += result.faces.length;
     }
 
     return { processed, facesFound };

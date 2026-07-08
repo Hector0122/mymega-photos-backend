@@ -145,12 +145,7 @@ async function run(input: WorkerInput): Promise<void> {
   let failed = 0;
   let stopped = false;
   const total = input.photoIds.length;
-
-  const existingNames = await prisma.face.findMany({
-    where: { personName: { not: null }, confirmed: true },
-    select: { personName: true, encoding: true },
-    distinct: ['personName'],
-  });
+  const { userId } = input;
 
   parentPort?.on('message', (msg) => {
     if (msg === 'stop') stopped = true;
@@ -174,10 +169,11 @@ async function run(input: WorkerInput): Promise<void> {
       chunk.map(async (photoId) => {
         const photo = await prisma.photo.findUnique({
           where: { id: photoId },
-          select: { s3Key: true, mimeType: true },
+          select: { s3Key: true, mimeType: true, userId: true },
         });
 
         if (!photo || photo.mimeType.startsWith('video/')) return 0;
+        if (photo.userId !== userId) return 0;
 
         const tmpDir = path.join(os.tmpdir(), 'vaulta-faces');
         if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
@@ -189,47 +185,59 @@ async function run(input: WorkerInput): Promise<void> {
 
           if (faces.length === 0) return 0;
 
-          await prisma.face.deleteMany({ where: { photoId } });
+          await prisma.$transaction(async (tx) => {
+            await tx.face.deleteMany({ where: { photoId } });
 
-          await prisma.face.createMany({
-            data: faces.map((f) => ({
-              photoId,
-              encoding: f.encoding,
-              boxX: f.boxX,
-              boxY: f.boxY,
-              boxWidth: f.boxWidth,
-              boxHeight: f.boxHeight,
-            })),
-          });
-
-          if (existingNames.length > 0) {
-            const newFaces = await prisma.face.findMany({
-              where: { photoId, personName: null, ignored: false },
+            await tx.face.createMany({
+              data: faces.map((f) => ({
+                photoId,
+                encoding: f.encoding,
+                boxX: f.boxX,
+                boxY: f.boxY,
+                boxWidth: f.boxWidth,
+                boxHeight: f.boxHeight,
+              })),
             });
 
-            for (const face of newFaces) {
-              const encoding = face.encoding as number[];
-              let bestMatch = '';
-              let bestDistance = Infinity;
+            const existingNames = await tx.face.findMany({
+              where: {
+                personName: { not: null },
+                confirmed: true,
+                photo: { userId },
+              },
+              select: { personName: true, encoding: true },
+              distinct: ['personName'],
+            });
 
-              for (const existing of existingNames) {
-                if (!existing.personName) continue;
-                const existingEncoding = existing.encoding as number[];
-                const dist = euclideanDistance(encoding, existingEncoding);
-                if (dist < MATCH_THRESHOLD && dist < bestDistance) {
-                  bestDistance = dist;
-                  bestMatch = existing.personName;
+            if (existingNames.length > 0) {
+              const newFaces = await tx.face.findMany({
+                where: { photoId, personName: null, ignored: false },
+              });
+
+              for (const face of newFaces) {
+                const encoding = face.encoding as number[];
+                let bestMatch = '';
+                let bestDistance = Infinity;
+
+                for (const existing of existingNames) {
+                  if (!existing.personName) continue;
+                  const existingEncoding = existing.encoding as number[];
+                  const dist = euclideanDistance(encoding, existingEncoding);
+                  if (dist < MATCH_THRESHOLD && dist < bestDistance) {
+                    bestDistance = dist;
+                    bestMatch = existing.personName;
+                  }
+                }
+
+                if (bestMatch) {
+                  await tx.face.update({
+                    where: { id: face.id },
+                    data: { personName: bestMatch, confirmed: true },
+                  });
                 }
               }
-
-              if (bestMatch) {
-                await prisma.face.update({
-                  where: { id: face.id },
-                  data: { personName: bestMatch, confirmed: true },
-                });
-              }
             }
-          }
+          });
 
           return faces.length;
         } finally {
