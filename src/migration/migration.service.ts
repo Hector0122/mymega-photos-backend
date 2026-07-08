@@ -249,7 +249,11 @@ export class MigrationService {
     return { moved };
   }
 
-  async fixVideoThumbnails(): Promise<{ checked: number; fixed: number; backfilled: number }> {
+  async fixVideoThumbnails(): Promise<{
+    checked: number;
+    fixed: number;
+    backfilled: number;
+  }> {
     const bucket = getBucketName();
 
     const thumbSet = new Set<string>();
@@ -278,7 +282,10 @@ export class MigrationService {
     for (const video of allVideos) {
       const match = video.s3Key.match(/^videos\/([^/]+)\/(.+)/);
       if (!match) continue;
-      const expectedThumb = `thumbs/${match[1]}/videos/${match[2]}`.replace(/\.\w+$/, '.jpg');
+      const expectedThumb = `thumbs/${match[1]}/videos/${match[2]}`.replace(
+        /\.\w+$/,
+        '.jpg',
+      );
 
       if (video.thumbS3Key) {
         if (!thumbSet.has(video.thumbS3Key)) {

@@ -437,7 +437,8 @@ export class PhotosService implements OnModuleInit {
 
     const normalized = tag.trim().toLowerCase();
     if (!normalized) return { tags: photo.tags, linkedPerson: null };
-    if (photo.tags.includes(normalized)) return { tags: photo.tags, linkedPerson: null };
+    if (photo.tags.includes(normalized))
+      return { tags: photo.tags, linkedPerson: null };
 
     const updated = await this.prisma.photo.update({
       where: { id: photoId },

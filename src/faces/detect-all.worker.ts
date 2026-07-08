@@ -28,11 +28,11 @@ function resolveScriptPath(): string {
     path.join(__dirname, '..', '..', 'faces', 'face-detect.mjs'),
     path.join(process.cwd(), 'dist', 'faces', 'face-detect.mjs'),
     path.join(process.cwd(), 'src', 'faces', 'face-detect.mjs'),
-  ]
+  ];
   for (const p of candidates) {
-    if (fs.existsSync(p)) return p
+    if (fs.existsSync(p)) return p;
   }
-  return candidates[0]
+  return candidates[0];
 }
 
 function runDetection(imagePath: string): Promise<
@@ -64,13 +64,17 @@ function runDetection(imagePath: string): Promise<
     });
 
     proc.on('error', (err) => {
-      console.error(`runDetection spawn error: ${err.message}, scriptPath: ${scriptPath}`);
+      console.error(
+        `runDetection spawn error: ${err.message}, scriptPath: ${scriptPath}`,
+      );
       resolve([]);
     });
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        console.error(`face-detect.mjs exited code ${code}, stderr: ${stderr}, scriptPath: ${scriptPath}`);
+        console.error(
+          `face-detect.mjs exited code ${code}, stderr: ${stderr}, scriptPath: ${scriptPath}`,
+        );
         resolve([]);
         return;
       }
@@ -101,15 +105,19 @@ async function downloadFromS3(
 }
 
 async function run(input: WorkerInput): Promise<void> {
-  console.log(`[scan-worker] Starting scan for ${input.photoIds.length} photos`)
-  console.log(`[scan-worker] face-detect.mjs path: ${resolveScriptPath()}`)
-  console.log(`[scan-worker] __dirname: ${__dirname}`)
-  console.log(`[scan-worker] cwd: ${process.cwd()}`)
+  console.log(
+    `[scan-worker] Starting scan for ${input.photoIds.length} photos`,
+  );
+  console.log(`[scan-worker] face-detect.mjs path: ${resolveScriptPath()}`);
+  console.log(`[scan-worker] __dirname: ${__dirname}`);
+  console.log(`[scan-worker] cwd: ${process.cwd()}`);
   const rawUrl = process.env.DATABASE_URL || '';
   const connectionString = rawUrl.includes('sslmode=')
     ? rawUrl
     : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}${
-        rawUrl.includes('railway.internal') ? 'sslmode=disable' : 'sslmode=require'
+        rawUrl.includes('railway.internal')
+          ? 'sslmode=disable'
+          : 'sslmode=require'
       }`;
   const adapter = new PrismaPg(
     { connectionString },
@@ -260,5 +268,9 @@ async function run(input: WorkerInput): Promise<void> {
 run(workerData as WorkerInput).catch((err: Error) => {
   console.error(`[scan-worker] Unhandled error: ${err.message}`);
   console.error(err.stack);
-  parentPort?.postMessage({ type: 'error', message: err.message, stack: err.stack });
+  parentPort?.postMessage({
+    type: 'error',
+    message: err.message,
+    stack: err.stack,
+  });
 });

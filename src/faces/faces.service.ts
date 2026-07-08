@@ -8,7 +8,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { FACE_DETECT_CONCURRENCY } from '../common/constants';
+import {
+  FACE_DETECT_CONCURRENCY,
+  FACE_DETECT_DEFAULT_LIMIT,
+  FACE_DETECT_MAX_LIMIT,
+} from '../common/constants';
 
 const MODELS_DIR = path.join(process.cwd(), 'models', 'face-api');
 const MATCH_THRESHOLD = 0.5;
@@ -107,11 +111,11 @@ export class FacesService implements OnModuleInit {
       path.join(__dirname, '..', '..', 'faces', 'face-detect.mjs'),
       path.join(process.cwd(), 'dist', 'faces', 'face-detect.mjs'),
       path.join(process.cwd(), 'src', 'faces', 'face-detect.mjs'),
-    ]
+    ];
     for (const p of candidates) {
-      if (fs.existsSync(p)) return p
+      if (fs.existsSync(p)) return p;
     }
-    return candidates[0]
+    return candidates[0];
   }
 
   private runDetection(
@@ -137,7 +141,10 @@ export class FacesService implements OnModuleInit {
       });
 
       proc.on('error', (err) => {
-        resolve({ faces: [], stderr: `spawn error: ${err.message}, scriptPath: ${scriptPath}` });
+        resolve({
+          faces: [],
+          stderr: `spawn error: ${err.message}, scriptPath: ${scriptPath}`,
+        });
       });
 
       proc.on('close', (code) => {
@@ -364,6 +371,11 @@ export class FacesService implements OnModuleInit {
     userId: string,
     limit?: number,
   ): Promise<{ jobId: string; total: number; status: string }> {
+    let effectiveLimit = limit ?? FACE_DETECT_DEFAULT_LIMIT;
+    if (effectiveLimit < 1) effectiveLimit = FACE_DETECT_DEFAULT_LIMIT;
+    if (effectiveLimit > FACE_DETECT_MAX_LIMIT)
+      effectiveLimit = FACE_DETECT_MAX_LIMIT;
+
     const photos = await this.prisma.photo.findMany({
       where: {
         userId,
@@ -373,12 +385,10 @@ export class FacesService implements OnModuleInit {
       select: { id: true, _count: { select: { faces: true } } },
     });
 
-    let photoIds = photos
-      .filter((p) => p._count.faces === 0)
-      .map((p) => p.id);
+    let photoIds = photos.filter((p) => p._count.faces === 0).map((p) => p.id);
 
-    if (limit && photoIds.length > limit) {
-      photoIds = photoIds.slice(0, limit);
+    if (photoIds.length > effectiveLimit) {
+      photoIds = photoIds.slice(0, effectiveLimit);
     }
 
     if (photoIds.length === 0) {
@@ -464,7 +474,7 @@ export class FacesService implements OnModuleInit {
     if (!job || job.status !== 'running') return false;
     job.status = 'stopped';
     if (job.worker) {
-      job.worker.terminate();
+      void job.worker.terminate();
       job.worker = undefined;
     }
     return true;
@@ -484,6 +494,114 @@ export class FacesService implements OnModuleInit {
     const total = photos.length;
     const detected = photos.filter((p) => p._count.faces > 0).length;
     return { total, pending: total - detected, detected };
+  }
+
+  async getPendingPhotos(
+    userId: string,
+    take = 50,
+    cursor?: string,
+  ): Promise<{
+    photos: { id: string; s3Key: string }[];
+    nextCursor: string | null;
+  }> {
+    const photos = await this.prisma.photo.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+        mimeType: { startsWith: 'image/' },
+        faces: { none: {} },
+      },
+      select: { id: true, s3Key: true },
+      take: take + 1,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const hasMore = photos.length > take;
+    if (hasMore) photos.pop();
+
+    const nextCursor = hasMore ? photos[photos.length - 1].id : null;
+
+    return { photos, nextCursor };
+  }
+
+  async getConfirmedEncodings(
+    userId: string,
+  ): Promise<{ people: { personName: string; encodings: number[][] }[] }> {
+    const faces = await this.prisma.face.findMany({
+      where: {
+        photo: { userId, deletedAt: null },
+        personName: { not: null },
+        confirmed: true,
+        ignored: false,
+      },
+      select: { personName: true, encoding: true },
+    });
+
+    const grouped = new Map<string, number[][]>();
+    for (const f of faces) {
+      if (!f.personName) continue;
+      const encs = grouped.get(f.personName) || [];
+      encs.push(f.encoding as number[]);
+      grouped.set(f.personName, encs);
+    }
+
+    const people = Array.from(grouped.entries()).map(
+      ([personName, encodings]) => ({
+        personName,
+        encodings,
+      }),
+    );
+
+    return { people };
+  }
+
+  async ingestResults(
+    userId: string,
+    results: Array<{
+      photoId: string;
+      faces: Array<{
+        encoding: number[];
+        boxX: number;
+        boxY: number;
+        boxWidth: number;
+        boxHeight: number;
+        personName?: string;
+      }>;
+    }>,
+  ): Promise<{ processed: number; facesFound: number }> {
+    let processed = 0;
+    let facesFound = 0;
+
+    for (const result of results) {
+      const photo = await this.prisma.photo.findUnique({
+        where: { id: result.photoId },
+        select: { userId: true },
+      });
+      if (!photo || photo.userId !== userId) continue;
+
+      await this.prisma.face.deleteMany({ where: { photoId: result.photoId } });
+
+      if (result.faces.length === 0) continue;
+
+      await this.prisma.face.createMany({
+        data: result.faces.map((f) => ({
+          photoId: result.photoId,
+          encoding: f.encoding,
+          boxX: f.boxX,
+          boxY: f.boxY,
+          boxWidth: f.boxWidth,
+          boxHeight: f.boxHeight,
+          personName: f.personName || null,
+          confirmed: !!f.personName,
+        })),
+      });
+
+      processed++;
+      facesFound += result.faces.length;
+    }
+
+    return { processed, facesFound };
   }
 
   async getPeople(userId: string): Promise<
@@ -862,14 +980,17 @@ export class FacesService implements OnModuleInit {
     await this.prisma.face.delete({ where: { id: faceId } });
   }
 
-  async deleteFacesByPhoto(photoId: string, userId: string, personName?: string) {
+  async deleteFacesByPhoto(
+    photoId: string,
+    userId: string,
+    personName?: string,
+  ) {
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
       select: { userId: true },
     });
 
-    if (!photo || photo.userId !== userId)
-      throw new Error('Photo not found');
+    if (!photo || photo.userId !== userId) throw new Error('Photo not found');
 
     const where: any = { photoId };
     if (personName) where.personName = personName;

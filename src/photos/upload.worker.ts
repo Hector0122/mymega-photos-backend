@@ -45,7 +45,9 @@ async function run(input: UploadWorkerInput) {
   const connectionString = rawUrl.includes('sslmode=')
     ? rawUrl
     : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}${
-        rawUrl.includes('railway.internal') ? 'sslmode=disable' : 'sslmode=require'
+        rawUrl.includes('railway.internal')
+          ? 'sslmode=disable'
+          : 'sslmode=require'
       }`;
   const adapter = new PrismaPg(
     { connectionString },
@@ -70,18 +72,28 @@ async function run(input: UploadWorkerInput) {
   };
 
   const MONTHS = [
-    '01-Enero','02-Febrero','03-Marzo','04-Abril','05-Mayo','06-Junio',
-    '07-Julio','08-Agosto','09-Septiembre','10-Octubre','11-Noviembre','12-Diciembre',
-  ]
+    '01-Enero',
+    '02-Febrero',
+    '03-Marzo',
+    '04-Abril',
+    '05-Mayo',
+    '06-Junio',
+    '07-Julio',
+    '08-Agosto',
+    '09-Septiembre',
+    '10-Octubre',
+    '11-Noviembre',
+    '12-Diciembre',
+  ];
 
   function fmtDate(d: Date): string {
-    const y = d.getFullYear()
-    const mo = String(d.getMonth() + 1).padStart(2, '0')
-    const da = String(d.getDate()).padStart(2, '0')
-    const h = String(d.getHours()).padStart(2, '0')
-    const mi = String(d.getMinutes()).padStart(2, '0')
-    const s = String(d.getSeconds()).padStart(2, '0')
-    return `${y}-${mo}-${da}_${h}${mi}${s}`
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    return `${y}-${mo}-${da}_${h}${mi}${s}`;
   }
 
   const CONCURRENCY = 5;
@@ -146,16 +158,16 @@ async function run(input: UploadWorkerInput) {
       photoDate = fs.statSync(file.path).mtime;
     }
 
-    const year = photoDate.getFullYear()
-    const month = MONTHS[photoDate.getMonth()]
-    const dateStr = fmtDate(photoDate)
+    const year = photoDate.getFullYear();
+    const month = MONTHS[photoDate.getMonth()];
+    const dateStr = fmtDate(photoDate);
 
     const isVideo = file.mimeType.startsWith('video/');
 
     if (isVideo) {
-      const ext = path.extname(file.filename).toLowerCase()
-      const videoKey = `videos/${userId}/${year}/${month}/${dateStr}${ext}`
-      const thumbKey = `thumbs/${userId}/videos/${year}/${month}/${dateStr}.jpg`
+      const ext = path.extname(file.filename).toLowerCase();
+      const videoKey = `videos/${userId}/${year}/${month}/${dateStr}${ext}`;
+      const thumbKey = `thumbs/${userId}/videos/${year}/${month}/${dateStr}.jpg`;
       const thumbPath = file.path + '-thumb.jpg';
 
       // Upload original video

@@ -19,7 +19,13 @@ import { FacesService } from './faces.service';
 import { UpdateFaceDto } from './dto/update-face.dto';
 import { DetectBatchDto } from './dto/detect-batch.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
+import { IngestFacesDto } from './dto/ingest-faces.dto';
 import { sanitize } from '../common/sanitize';
+import {
+  FACE_DETECT_DEFAULT_LIMIT,
+  FACE_DETECT_MAX_LIMIT,
+  FACE_INGEST_MAX_PHOTOS,
+} from '../common/constants';
 
 @Controller('faces')
 @UseGuards(JwtAuthGuard)
@@ -69,10 +75,16 @@ export class FacesController {
     @CurrentUser() user: { id: string },
     @Query('limit') limit?: string,
   ) {
-    return this.facesService.detectAll(
-      user.id,
-      limit ? parseInt(limit, 10) : undefined,
-    );
+    let effectiveLimit = limit
+      ? parseInt(limit, 10)
+      : FACE_DETECT_DEFAULT_LIMIT;
+    if (isNaN(effectiveLimit) || effectiveLimit < 1) {
+      effectiveLimit = FACE_DETECT_DEFAULT_LIMIT;
+    }
+    if (effectiveLimit > FACE_DETECT_MAX_LIMIT) {
+      effectiveLimit = FACE_DETECT_MAX_LIMIT;
+    }
+    return this.facesService.detectAll(user.id, effectiveLimit);
   }
 
   @Get('detect-status')
@@ -81,7 +93,7 @@ export class FacesController {
   }
 
   @Get('detect-progress/:jobId')
-  async getDetectProgress(@Param('jobId') jobId: string) {
+  getDetectProgress(@Param('jobId') jobId: string) {
     const progress = this.facesService.getDetectProgress(jobId);
     if (!progress) throw new NotFoundException('Job not found');
     return progress;
@@ -89,9 +101,41 @@ export class FacesController {
 
   @Post('detect-stop')
   @HttpCode(HttpStatus.OK)
-  async stopDetectAll(@Body('jobId') jobId: string) {
+  stopDetectAll(@Body('jobId') jobId: string) {
     const stopped = this.facesService.stopDetectAll(jobId);
     return { stopped };
+  }
+
+  @Get('pending')
+  async getPending(
+    @CurrentUser() user: { id: string },
+    @Query('take') take?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.facesService.getPendingPhotos(
+      user.id,
+      take ? parseInt(take, 10) : 50,
+      cursor,
+    );
+  }
+
+  @Get('confirmed-encodings')
+  async getConfirmedEncodings(@CurrentUser() user: { id: string }) {
+    return this.facesService.getConfirmedEncodings(user.id);
+  }
+
+  @Post('ingest')
+  @HttpCode(HttpStatus.OK)
+  async ingestFaces(
+    @CurrentUser() user: { id: string },
+    @Body() dto: IngestFacesDto,
+  ) {
+    if (dto.results.length > FACE_INGEST_MAX_PHOTOS) {
+      throw new BadRequestException(
+        `Max ${FACE_INGEST_MAX_PHOTOS} photos per request`,
+      );
+    }
+    return this.facesService.ingestResults(user.id, dto.results);
   }
 
   @Get('unconfirmed')
