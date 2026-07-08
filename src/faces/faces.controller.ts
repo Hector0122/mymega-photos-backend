@@ -65,8 +65,14 @@ export class FacesController {
 
   @Post('detect-all')
   @HttpCode(HttpStatus.OK)
-  async detectAll(@CurrentUser() user: { id: string }) {
-    return this.facesService.detectAll(user.id);
+  async detectAll(
+    @CurrentUser() user: { id: string },
+    @Query('limit') limit?: string,
+  ) {
+    return this.facesService.detectAll(
+      user.id,
+      limit ? parseInt(limit, 10) : undefined,
+    );
   }
 
   @Get('detect-status')

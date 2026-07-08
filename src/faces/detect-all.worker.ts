@@ -138,6 +138,12 @@ async function run(input: WorkerInput): Promise<void> {
   let stopped = false;
   const total = input.photoIds.length;
 
+  const existingNames = await prisma.face.findMany({
+    where: { personName: { not: null }, confirmed: true },
+    select: { personName: true, encoding: true },
+    distinct: ['personName'],
+  });
+
   parentPort?.on('message', (msg) => {
     if (msg === 'stop') stopped = true;
   });
@@ -186,12 +192,6 @@ async function run(input: WorkerInput): Promise<void> {
               boxWidth: f.boxWidth,
               boxHeight: f.boxHeight,
             })),
-          });
-
-          const existingNames = await prisma.face.findMany({
-            where: { personName: { not: null }, confirmed: true },
-            select: { personName: true, encoding: true },
-            distinct: ['personName'],
           });
 
           if (existingNames.length > 0) {

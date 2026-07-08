@@ -362,6 +362,7 @@ export class FacesService implements OnModuleInit {
 
   async detectAll(
     userId: string,
+    limit?: number,
   ): Promise<{ jobId: string; total: number; status: string }> {
     const photos = await this.prisma.photo.findMany({
       where: {
@@ -372,9 +373,13 @@ export class FacesService implements OnModuleInit {
       select: { id: true, _count: { select: { faces: true } } },
     });
 
-    const photoIds = photos
+    let photoIds = photos
       .filter((p) => p._count.faces === 0)
       .map((p) => p.id);
+
+    if (limit && photoIds.length > limit) {
+      photoIds = photoIds.slice(0, limit);
+    }
 
     if (photoIds.length === 0) {
       return { jobId: '', total: 0, status: 'nothing_to_scan' };
