@@ -13,7 +13,8 @@ interface WorkerInput {
   concurrency: number;
 }
 
-const MATCH_THRESHOLD = 0.5;
+const MATCH_THRESHOLD = 0.45;
+const MATCH_RATIO = 1.2;
 
 function euclideanDistance(a: number[], b: number[]): number {
   let sum = 0;
@@ -199,42 +200,55 @@ async function run(input: WorkerInput): Promise<void> {
               })),
             });
 
-            const existingNames = await tx.face.findMany({
+            const allExisting = await tx.face.findMany({
               where: {
                 personName: { not: null },
                 confirmed: true,
                 photo: { userId },
               },
               select: { personName: true, encoding: true },
-              distinct: ['personName'],
             });
 
-            if (existingNames.length > 0) {
+            const personEncodings = new Map<string, number[][]>();
+            for (const ef of allExisting) {
+              if (!ef.personName) continue;
+              const encs = personEncodings.get(ef.personName) || [];
+              encs.push(ef.encoding as number[]);
+              personEncodings.set(ef.personName, encs);
+            }
+
+            if (personEncodings.size > 0) {
               const newFaces = await tx.face.findMany({
                 where: { photoId, personName: null, ignored: false },
               });
 
               for (const face of newFaces) {
                 const encoding = face.encoding as number[];
-                let bestMatch = '';
-                let bestDistance = Infinity;
+                const scores: { name: string; avgDist: number }[] = [];
 
-                for (const existing of existingNames) {
-                  if (!existing.personName) continue;
-                  const existingEncoding = existing.encoding as number[];
-                  const dist = euclideanDistance(encoding, existingEncoding);
-                  if (dist < MATCH_THRESHOLD && dist < bestDistance) {
-                    bestDistance = dist;
-                    bestMatch = existing.personName;
+                for (const [name, encs] of personEncodings) {
+                  let sum = 0;
+                  for (const refEnc of encs) {
+                    sum += euclideanDistance(encoding, refEnc);
                   }
+                  scores.push({ name, avgDist: sum / encs.length });
                 }
 
-                if (bestMatch) {
-                  await tx.face.update({
-                    where: { id: face.id },
-                    data: { personName: bestMatch, confirmed: true },
-                  });
+                scores.sort((a, b) => a.avgDist - b.avgDist);
+
+                if (scores.length === 0) continue;
+                const best = scores[0];
+                if (best.avgDist >= MATCH_THRESHOLD) continue;
+
+                if (scores.length >= 2) {
+                  const second = scores[1];
+                  if (second.avgDist / best.avgDist < MATCH_RATIO) continue;
                 }
+
+                await tx.face.update({
+                  where: { id: face.id },
+                  data: { personName: best.name, confirmed: true },
+                });
               }
             }
           });

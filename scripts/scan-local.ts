@@ -15,7 +15,8 @@ globalThis.require = require;
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local' });
 
-const MATCH_THRESHOLD = 0.5;
+const MATCH_THRESHOLD = 0.45;
+const MATCH_RATIO = 1.2;
 const FACE_DETECT_MAX_WIDTH = 1024;
 const CHECKPOINT_FILE = 'scan-state.json';
 const TMP_DIR = path.join(os.tmpdir(), 'vaulta-scan-local');
@@ -283,20 +284,31 @@ function matchFaces(
   if (confirmedPeople.length === 0) return faces;
 
   return faces.map((face) => {
-    let bestMatch = '';
-    let bestDistance = Infinity;
+    const scores: { name: string; avgDist: number }[] = [];
 
     for (const person of confirmedPeople) {
+      let sum = 0;
       for (const refEnc of person.encodings) {
-        const dist = euclideanDistance(face.encoding, refEnc);
-        if (dist < MATCH_THRESHOLD && dist < bestDistance) {
-          bestDistance = dist;
-          bestMatch = person.personName;
-        }
+        sum += euclideanDistance(face.encoding, refEnc);
       }
+      scores.push({
+        name: person.personName,
+        avgDist: sum / person.encodings.length,
+      });
     }
 
-    return bestMatch ? { ...face, personName: bestMatch } : face;
+    scores.sort((a, b) => a.avgDist - b.avgDist);
+
+    if (scores.length === 0) return face;
+    const best = scores[0];
+    if (best.avgDist >= MATCH_THRESHOLD) return face;
+
+    if (scores.length >= 2) {
+      const second = scores[1];
+      if (second.avgDist / best.avgDist < MATCH_RATIO) return face;
+    }
+
+    return { ...face, personName: best.name };
   });
 }
 
