@@ -33,8 +33,8 @@ async function detect(imagePath) {
     .detectAllFaces(
       input,
       new faceapi.TinyFaceDetectorOptions({
-        inputSize: 416,
-        scoreThreshold: 0.5,
+        inputSize: 320,
+        scoreThreshold: 0.1,
       }),
     )
     .withFaceLandmarks()
