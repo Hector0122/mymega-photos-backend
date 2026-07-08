@@ -276,9 +276,9 @@ export class MigrationService {
     let backfilled = 0;
 
     for (const video of allVideos) {
-      const expectedThumb = video.s3Key
-        .replace('videos/', 'thumbs/')
-        .replace(/\.\w+$/, '.jpg');
+      const match = video.s3Key.match(/^videos\/([^/]+)\/(.+)/);
+      if (!match) continue;
+      const expectedThumb = `thumbs/${match[1]}/videos/${match[2]}`.replace(/\.\w+$/, '.jpg');
 
       if (video.thumbS3Key) {
         if (!thumbSet.has(video.thumbS3Key)) {
