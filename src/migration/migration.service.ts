@@ -40,9 +40,6 @@ export class MigrationService {
     });
     if (!user) throw new Error('User not found');
 
-    // Limpiar fotos existentes para evitar datos huérfanos del sync anterior
-    await this.prisma.photo.deleteMany({ where: { userId } });
-
     let continuationToken: string | undefined;
     let synced = 0;
     const thumbMap = new Map<string, string>();
@@ -68,6 +65,12 @@ export class MigrationService {
         }
         if (key.startsWith('thumb-')) continue;
         if (limit && synced >= limit) break;
+
+        // Saltar si ya está importada (permite batches)
+        const existing = await this.prisma.photo.findUnique({
+          where: { s3Key: key },
+        });
+        if (existing) continue;
 
         const base = this.baseName(key);
         const lastPart = base.includes('/') ? base.split('/').pop()! : base;
