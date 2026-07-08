@@ -44,7 +44,9 @@ async function run(input: UploadWorkerInput) {
   if (!rawUrl) throw new Error('DATABASE_URL is required');
   const connectionString = rawUrl.includes('sslmode=')
     ? rawUrl
-    : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=verify-full`;
+    : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}${
+        rawUrl.includes('railway.internal') ? 'sslmode=disable' : 'sslmode=require'
+      }`;
   const adapter = new PrismaPg(
     { connectionString },
     { schema: process.env.DATABASE_SCHEMA || 'public' },

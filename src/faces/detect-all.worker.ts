@@ -108,7 +108,9 @@ async function run(input: WorkerInput): Promise<void> {
   const rawUrl = process.env.DATABASE_URL || '';
   const connectionString = rawUrl.includes('sslmode=')
     ? rawUrl
-    : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=verify-full`;
+    : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}${
+        rawUrl.includes('railway.internal') ? 'sslmode=disable' : 'sslmode=require'
+      }`;
   const adapter = new PrismaPg(
     { connectionString },
     { schema: process.env.DATABASE_SCHEMA || 'public' },
