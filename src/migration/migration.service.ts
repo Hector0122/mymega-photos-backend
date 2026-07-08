@@ -26,7 +26,10 @@ export class MigrationService {
   ) {}
 
   private baseName(key: string): string {
-    return key.replace('uploads/', '').replace('thumbnails/', '');
+    return key
+      .replace(/^(thumbs|thumbnails)\//, '')
+      .replace(/^(fotos|videos)\/[^/]+\//, '')
+      .replace(/^uploads\//, '');
   }
 
   async syncS3ToDb(
@@ -58,7 +61,7 @@ export class MigrationService {
       }));
 
       for (const { key, size, lastModified } of entries) {
-        if (key.startsWith('thumbnails/')) {
+        if (key.startsWith('thumbnails/') || key.startsWith('thumbs/')) {
           const base = this.baseName(key);
           thumbMap.set(base, key);
           continue;
@@ -246,29 +249,57 @@ export class MigrationService {
     return { moved };
   }
 
-  async fixVideoThumbnails(): Promise<{ checked: number; fixed: number }> {
+  async fixVideoThumbnails(): Promise<{ checked: number; fixed: number; backfilled: number }> {
     const bucket = getBucketName();
-    const videos = await this.prisma.photo.findMany({
-      where: { mimeType: { startsWith: 'video/' }, thumbS3Key: { not: null } },
-      select: { id: true, thumbS3Key: true, s3Key: true },
+
+    const thumbSet = new Set<string>();
+    let token: string | undefined;
+    do {
+      const cmd = new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: 'thumbs/',
+        ContinuationToken: token,
+      });
+      const r = await this.s3.send(cmd);
+      for (const obj of r.Contents || []) {
+        if (obj.Key && obj.Key.includes('/videos/')) thumbSet.add(obj.Key);
+      }
+      token = r.NextContinuationToken;
+    } while (token);
+
+    const allVideos = await this.prisma.photo.findMany({
+      where: { mimeType: { startsWith: 'video/' } },
+      select: { id: true, s3Key: true, thumbS3Key: true },
     });
 
     let fixed = 0;
-    for (const video of videos) {
-      if (!video.thumbS3Key) continue;
-      try {
-        await this.s3.send(
-          new HeadObjectCommand({ Bucket: bucket, Key: video.thumbS3Key }),
-        );
-      } catch {
-        await this.prisma.photo.update({
-          where: { id: video.id },
-          data: { thumbS3Key: null },
-        });
-        fixed++;
+    let backfilled = 0;
+
+    for (const video of allVideos) {
+      const expectedThumb = video.s3Key
+        .replace('videos/', 'thumbs/')
+        .replace(/\.\w+$/, '.jpg');
+
+      if (video.thumbS3Key) {
+        if (!thumbSet.has(video.thumbS3Key)) {
+          await this.prisma.photo.update({
+            where: { id: video.id },
+            data: { thumbS3Key: null },
+          });
+          fixed++;
+        }
+      } else {
+        if (thumbSet.has(expectedThumb)) {
+          await this.prisma.photo.update({
+            where: { id: video.id },
+            data: { thumbS3Key: expectedThumb },
+          });
+          backfilled++;
+        }
       }
     }
-    return { checked: videos.length, fixed };
+
+    return { checked: allVideos.length, fixed, backfilled };
   }
 
   async migrateVault(userId: string): Promise<{ moved: number }> {
