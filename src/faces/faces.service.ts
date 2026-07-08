@@ -537,10 +537,12 @@ export class FacesService implements OnModuleInit {
     userId: string,
     take = 50,
     cursor?: string,
+    page?: number,
   ): Promise<{
     photos: { id: string; s3Key: string }[];
     nextCursor: string | null;
   }> {
+    const skip = page ? (page - 1) * take : undefined;
     const photos = await this.prisma.photo.findMany({
       where: {
         userId,
@@ -551,6 +553,7 @@ export class FacesService implements OnModuleInit {
       select: { id: true, s3Key: true },
       take: take + 1,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      ...(skip !== undefined ? { skip } : {}),
       orderBy: { createdAt: 'asc' },
     });
 

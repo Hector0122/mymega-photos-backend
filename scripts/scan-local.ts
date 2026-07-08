@@ -130,7 +130,7 @@ function saveCheckpoint() {
   const raw: CheckpointData = {
     processedIds: Array.from(state.processedIds),
     failedIds: state.failedIds,
-    lastCursor: state.lastCursor,
+    lastCursor: null,
     totalProcessed: state.totalProcessed,
     totalFaces: state.totalFaces,
     startedAt: state.startedAt,
@@ -164,10 +164,9 @@ async function fetchApi<T>(
 
 async function fetchPending(
   take: number,
-  cursor?: string | null,
+  page: number,
 ): Promise<{ photos: PendingPhoto[]; nextCursor: string | null }> {
-  let url = `pending?take=${take}`;
-  if (cursor) url += `&cursor=${cursor}`;
+  const url = `pending?take=${take}&page=${page}`;
   return fetchApi('GET', url);
 }
 
@@ -249,8 +248,8 @@ async function runDetection(imagePath: string): Promise<DetectedFace[]> {
         .detectAllFaces(
           input,
           new faceapi.TinyFaceDetectorOptions({
-            inputSize: 416,
-            scoreThreshold: 0.5,
+            inputSize: 320,
+            scoreThreshold: 0.1,
           }),
         )
         .withFaceLandmarks()
@@ -260,7 +259,9 @@ async function runDetection(imagePath: string): Promise<DetectedFace[]> {
       return detections.map((d: any) => {
         const enc = Array.from(d.descriptor);
         if (enc.length !== 128) {
-          console.warn(`  Unexpected encoding length: ${enc.length}, expected 128`);
+          console.warn(
+            `  Unexpected encoding length: ${enc.length}, expected 128`,
+          );
         }
         return {
           encoding: enc,
@@ -344,7 +345,9 @@ async function processPhoto(
     await downloadFromR2(photo.s3Key, tmpFile);
     return await runDetection(tmpFile);
   } catch (err) {
-    console.error(`\n  Error processing ${photo.s3Key}: ${(err as Error).message}`);
+    console.error(
+      `\n  Error processing ${photo.s3Key}: ${(err as Error).message}`,
+    );
     return null;
   } finally {
     try {
@@ -372,7 +375,11 @@ async function main() {
       3,
     )
     .option('--dry-run', 'Do not send results, only show what would be sent')
-    .option('--resume', 'Resume from scan-state.json checkpoint')
+    .option(
+      '--resume',
+      'Resume from scan-state.json checkpoint (auto if file exists)',
+    )
+    .option('--no-resume', 'Ignore existing checkpoint and start fresh')
     .option('--max-photos <n>', 'Stop after processing N photos', parseInt)
     .option(
       '--take <n>',
@@ -388,7 +395,11 @@ async function main() {
   const maxPhotos = opts.maxPhotos || Infinity;
   const take = opts.take || 100;
   dryRun = !!opts.dryRun;
-  const resume = !!opts.resume;
+  const noResume = !!opts.noResume;
+  const resume = noResume
+    ? false
+    : !!opts.resume || fs.existsSync(CHECKPOINT_FILE);
+  const additionalMode = resume && maxPhotos !== Infinity;
 
   apiUrl = (process.env.VAULTA_API_URL || '').replace(/\/+$/, '');
   apiKey = process.env.VAULTA_API_KEY || '';
@@ -471,11 +482,10 @@ async function main() {
 
   console.log('');
 
-  if (resume && state.lastCursor) {
-    state.lastCursor = state.lastCursor;
-  }
-
-  let cursor: string | null = state.lastCursor;
+  // Use page-based pagination. We start from page 1 and skip already-
+  // processed photos via processedIds. This avoids cursor-invalidation bugs
+  // when a cursor photo gets faces and is no longer returned by /pending.
+  let page = 1;
   let processed = state.totalProcessed;
   let facesFound = state.totalFaces;
   let failedCount = state.failedIds.length;
@@ -488,7 +498,7 @@ async function main() {
     let pending: { photos: PendingPhoto[]; nextCursor: string | null };
 
     try {
-      pending = await fetchPending(take, cursor);
+      pending = await fetchPending(take, page);
     } catch (err) {
       console.error(`\nError fetching pending: ${(err as Error).message}`);
       await sleep(5000);
@@ -501,21 +511,29 @@ async function main() {
     }
 
     if (totalPending === 0) {
-      totalPending = resume
-        ? pending.photos.length + processed + failedCount
-        : pending.photos.length;
+      totalPending = pending.photos.length;
     }
 
     const batch: PendingPhoto[] = [];
     for (const photo of pending.photos) {
       if (state.processedIds.has(photo.id)) continue;
       batch.push(photo);
-      if (processed + failedCount + batch.length >= maxPhotos) break;
+      const newlyProcessed =
+        processed - state.totalProcessed + failedCount - state.failedIds.length;
+      if (additionalMode && newlyProcessed + batch.length >= maxPhotos) break;
+      if (
+        !additionalMode &&
+        processed + failedCount + batch.length >= maxPhotos
+      )
+        break;
     }
 
     if (batch.length === 0) {
-      cursor = pending.nextCursor;
-      if (!cursor) morePages = false;
+      page++;
+      if (page > 500) {
+        // safety: prevent infinite loop
+        morePages = false;
+      }
       continue;
     }
 
@@ -598,15 +616,19 @@ async function main() {
       );
     }
 
-    cursor = pending.nextCursor;
-    state.lastCursor = cursor;
-    if (!cursor) morePages = false;
+    page++;
 
-    state.totalProcessed = processed;
-    state.totalFaces = facesFound;
-
-    if (processed + failedCount >= maxPhotos) {
-      morePages = false;
+    if (additionalMode) {
+      const prevTotal = state.totalProcessed;
+      const prevFailed = state.failedIds.length;
+      state.totalProcessed = processed;
+      state.totalFaces = facesFound;
+      const newlyDone = processed - prevTotal + failedCount - prevFailed;
+      if (newlyDone >= maxPhotos) morePages = false;
+    } else {
+      state.totalProcessed = processed;
+      state.totalFaces = facesFound;
+      if (processed + failedCount >= maxPhotos) morePages = false;
     }
 
     saveCheckpoint();

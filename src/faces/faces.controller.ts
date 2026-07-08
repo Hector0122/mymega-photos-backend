@@ -111,11 +111,13 @@ export class FacesController {
     @CurrentUser() user: { id: string },
     @Query('take') take?: string,
     @Query('cursor') cursor?: string,
+    @Query('page') page?: string,
   ) {
     return this.facesService.getPendingPhotos(
       user.id,
       take ? parseInt(take, 10) : 50,
       cursor,
+      page ? parseInt(page, 10) : undefined,
     );
   }
 
