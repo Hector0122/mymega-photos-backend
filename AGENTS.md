@@ -199,12 +199,47 @@ adb reverse tcp:3000 tcp:3000
 
 | Script | Descripción |
 |---|---|
+| `scan-local.ts` | Face detection masiva desde CPU local (descarga de R2, detecta con face-api, hace matching con personas confirmadas, envía resultados a la API) |
 | `bulk-upload.ts` | Subida masiva desde disco externo a R2 + DB con dedup por hash perceptual |
 | `generate-video-thumbnails.ts` | Genera thumbnails de video faltantes (ffmpeg) |
 | `count-r2.ts` | Cuenta objetos en R2 |
 | `db-r2-diff.ts` | Compara DB vs R2 |
 | `fix-db-r2-diff.ts` | Repara discrepancias DB/R2 |
 | `clean-r2.ts` | Elimina objetos en R2 por prefijo |
+
+### `scan-local.ts` — Face detection masiva
+
+Escanea fotos pendientes (sin caras detectadas) usando CPU local. Descarga cada foto de R2 a temp, corre face-api.js, hace matching euclidiano contra encodings confirmados, y envía resultados a `POST /faces/ingest`.
+
+**Flags:**
+| Flag | Default | Descripción |
+|---|---|---|
+| `--max-photos <N>` | ∞ | En fresh start: procesa N fotos totales. En resume: procesa N fotos **adicionales** al checkpoint. |
+| `--resume` | auto | Fuerza reanudar desde checkpoint (auto si existe `scan-state.json`). |
+| `--no-resume` | — | Ignora checkpoint y empieza de cero (borra `scan-state.json` internamente). |
+| `--take <N>` | 100 | Fotos por página del endpoint `GET /faces/pending`. |
+| `--batch <N>` | 50 | Fotos por request a `POST /faces/ingest` (max 100). |
+| `--concurrency <N>` | 3 | Descargas concurrentes (1-5). |
+| `--dry-run` | — | No envía resultados, solo muestra lo que se enviaría. |
+
+**Paginación:** usa `?page=N&take=100` (offset-based) en vez de cursor. Esto evita que el script se atasque cuando una foto cursor deja de estar en pending tras ser procesada.
+
+**Checkpoint:** guarda estado en `scan-state.json` (processedIds, totalProcessed, totalFaces, failedIds). Al reanudar, salta las fotos ya procesadas usando `processedIds` (sin depender de cursores). El flag `--max-photos` es **incremental** en modo resume: pides N fotos nuevas, no un total acumulado.
+
+**Ejemplos:**
+```bash
+# Primera ejecución: procesar 1000 fotos
+pnpm tsx scripts/scan-local.ts --max-photos 1000
+
+# Reanudar y procesar 500 más
+pnpm tsx scripts/scan-local.ts --max-photos 500
+
+# Empezar de cero (ignorar checkpoint)
+pnpm tsx scripts/scan-local.ts --max-photos 1000 --no-resume
+
+# Prueba sin enviar nada
+pnpm tsx scripts/scan-local.ts --max-photos 5 --dry-run
+```
 
 ## Coding conventions
 
