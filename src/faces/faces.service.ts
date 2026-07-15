@@ -236,11 +236,15 @@ export class FacesService implements OnModuleInit {
 
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
-      select: { s3Key: true, mimeType: true, userId: true },
+      select: { s3Key: true, mimeType: true, userId: true, private: true },
     });
 
     if (!photo || photo.userId !== userId) {
       throw new Error('Photo not found');
+    }
+
+    if (photo.private) {
+      return [];
     }
 
     const isVideo = photo.mimeType.startsWith('video/');
@@ -407,6 +411,7 @@ export class FacesService implements OnModuleInit {
       where: {
         userId,
         deletedAt: null,
+        private: false,
         mimeType: { not: { startsWith: 'video/' } },
       },
       select: { id: true, _count: { select: { faces: true } } },
@@ -547,6 +552,7 @@ export class FacesService implements OnModuleInit {
       where: {
         userId,
         deletedAt: null,
+        private: false,
         mimeType: { startsWith: 'image/' },
         faces: { none: {} },
       },
@@ -570,7 +576,7 @@ export class FacesService implements OnModuleInit {
   ): Promise<{ people: { personName: string; encodings: number[][] }[] }> {
     const faces = await this.prisma.face.findMany({
       where: {
-        photo: { userId, deletedAt: null },
+        photo: { userId, deletedAt: null, private: false },
         personName: { not: null },
         confirmed: true,
         ignored: false,
@@ -617,9 +623,9 @@ export class FacesService implements OnModuleInit {
       await this.prisma.$transaction(async (tx) => {
         const photo = await tx.photo.findUnique({
           where: { id: result.photoId },
-          select: { userId: true },
+          select: { userId: true, private: true },
         });
-        if (!photo || photo.userId !== userId) return;
+        if (!photo || photo.userId !== userId || photo.private) return;
 
         await tx.face.deleteMany({ where: { photoId: result.photoId } });
 
@@ -657,7 +663,7 @@ export class FacesService implements OnModuleInit {
   > {
     const faces = await this.prisma.face.findMany({
       where: {
-        photo: { userId, deletedAt: null },
+        photo: { userId, deletedAt: null, private: false },
         personName: { not: null },
         confirmed: true,
         ignored: false,
@@ -727,7 +733,7 @@ export class FacesService implements OnModuleInit {
   > {
     const faces = await this.prisma.face.findMany({
       where: {
-        photo: { userId, deletedAt: null },
+        photo: { userId, deletedAt: null, private: false },
         confirmed: false,
         ignored: false,
       },
@@ -743,7 +749,7 @@ export class FacesService implements OnModuleInit {
 
     const confirmedFaces = await this.prisma.face.findMany({
       where: {
-        photo: { userId, deletedAt: null },
+        photo: { userId, deletedAt: null, private: false },
         personName: { not: null },
         confirmed: true,
         ignored: false,
@@ -925,12 +931,12 @@ export class FacesService implements OnModuleInit {
   }> {
     const [totalFaces, peopleResult, allPersonData] = await Promise.all([
       this.prisma.face.count({
-        where: { photo: { userId, deletedAt: null }, ignored: false },
+        where: { photo: { userId, deletedAt: null, private: false }, ignored: false },
       }),
       this.prisma.face.groupBy({
         by: ['personName'],
         where: {
-          photo: { userId, deletedAt: null },
+          photo: { userId, deletedAt: null, private: false },
           personName: { not: null },
           confirmed: true,
           ignored: false,
@@ -939,7 +945,7 @@ export class FacesService implements OnModuleInit {
       }),
       this.prisma.face.findMany({
         where: {
-          photo: { userId, deletedAt: null },
+          photo: { userId, deletedAt: null, private: false },
           personName: { not: null },
           confirmed: true,
           ignored: false,
@@ -1047,7 +1053,7 @@ export class FacesService implements OnModuleInit {
   ): Promise<number> {
     const result = await this.prisma.face.updateMany({
       where: {
-        photo: { userId },
+        photo: { userId, private: false },
         personName,
         confirmed: false,
         ignored: false,
@@ -1082,7 +1088,7 @@ export class FacesService implements OnModuleInit {
   > {
     const confirmedFaces = await this.prisma.face.findMany({
       where: {
-        photo: { userId, deletedAt: null },
+        photo: { userId, deletedAt: null, private: false },
         personName,
         confirmed: true,
         ignored: false,
@@ -1115,7 +1121,7 @@ export class FacesService implements OnModuleInit {
     while (hasMore) {
       const batch = await this.prisma.face.findMany({
         where: {
-          photo: { userId, deletedAt: null },
+          photo: { userId, deletedAt: null, private: false },
           confirmed: false,
           ignored: false,
           personName: null,
@@ -1225,5 +1231,16 @@ export class FacesService implements OnModuleInit {
       sum += (a[i] - b[i]) ** 2;
     }
     return Math.sqrt(sum);
+  }
+
+  async cleanupPrivateFaces(
+    userId: string,
+  ): Promise<{ deleted: number }> {
+    const result = await this.prisma.face.deleteMany({
+      where: {
+        photo: { userId, private: true },
+      },
+    });
+    return { deleted: result.count };
   }
 }

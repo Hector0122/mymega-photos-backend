@@ -140,6 +140,12 @@ export class FacesController {
     return this.facesService.ingestResults(user.id, dto.results);
   }
 
+  @Post('cleanup-private')
+  @HttpCode(HttpStatus.OK)
+  async cleanupPrivateFaces(@CurrentUser() user: { id: string }) {
+    return this.facesService.cleanupPrivateFaces(user.id);
+  }
+
   @Get('unconfirmed')
   async getUnconfirmed(@CurrentUser() user: { id: string }) {
     return this.facesService.getUnconfirmed(user.id);
