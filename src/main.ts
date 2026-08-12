@@ -8,7 +8,7 @@ async function bootstrap() {
   app.use(helmet());
   app.use(json({ limit: '50mb' }));
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') || true,
+    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: false,
   });

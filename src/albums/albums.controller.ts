@@ -9,15 +9,12 @@ import {
   Query,
   HttpCode,
   HttpStatus,
-  UseGuards,
 } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AlbumsService } from './albums.service';
 import { sanitize } from '../common/sanitize';
 
-@UseGuards(JwtAuthGuard)
 @Controller('albums')
 export class AlbumsController {
   constructor(private albums: AlbumsService) {}

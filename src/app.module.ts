@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AllExceptionsFilter } from './common/exception.filter';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { PrismaModule } from './prisma.module';
 import { S3Module } from './common/s3.module';
 import { AuthModule } from './auth/auth.module';
@@ -20,7 +21,10 @@ import { FacesModule } from './faces/faces.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot({ throttlers: [{ limit: 60, ttl: 60000 }] }),
+    // ponytail: 300/min por IP — holgado porque el multi-select del frontend
+    // dispara N requests en paralelo (Home/index.tsx); el límite estricto vive
+    // en auth.controller.ts vía @Throttle
+    ThrottlerModule.forRoot({ throttlers: [{ limit: 300, ttl: 60000 }] }),
     PrismaModule,
     S3Module,
     AuthModule,
@@ -35,6 +39,15 @@ import { FacesModule } from './faces/faces.module';
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+    // Auth fail-closed: todo endpoint exige JWT salvo que se marque @SkipAuth.
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,

@@ -5,11 +5,10 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { SkipAuth } from './skip-auth.decorator';
 import { CurrentUser } from './current-user.decorator';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -20,12 +19,14 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 export class AuthController {
   constructor(private auth: AuthService) {}
 
+  @SkipAuth()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
   async register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
   }
 
+  @SkipAuth()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -33,13 +34,13 @@ export class AuthController {
     return this.auth.login(dto);
   }
 
+  @SkipAuth()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(@Body() dto: RefreshTokenDto) {
     return this.auth.refresh(dto.refreshToken);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(@CurrentUser() user: { id: string }) {
@@ -47,7 +48,6 @@ export class AuthController {
     return { message: 'Logged out' };
   }
 
-  @UseGuards(JwtAuthGuard)
   @Patch('profile')
   @HttpCode(HttpStatus.OK)
   async updateProfile(

@@ -7,14 +7,11 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ExportService } from './export.service';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class ExportController {
   constructor(private readonly exportService: ExportService) {}
 
