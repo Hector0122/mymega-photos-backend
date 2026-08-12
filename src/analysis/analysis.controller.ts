@@ -5,14 +5,11 @@ import {
   Param,
   HttpCode,
   HttpStatus,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AnalysisService } from './analysis.service';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class AnalysisController {
   constructor(private readonly analysisService: AnalysisService) {}
 

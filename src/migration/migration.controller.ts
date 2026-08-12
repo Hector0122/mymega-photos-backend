@@ -4,14 +4,11 @@ import {
   Query,
   HttpCode,
   HttpStatus,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { MigrationService } from './migration.service';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class MigrationController {
   constructor(private readonly migrationService: MigrationService) {}
 

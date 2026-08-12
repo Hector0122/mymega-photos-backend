@@ -15,7 +15,6 @@ import {
   UseInterceptors,
   UploadedFile,
   UploadedFiles,
-  UseGuards,
   Res,
   Req,
 } from '@nestjs/common';
@@ -25,7 +24,6 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SkipAuth } from '../auth/skip-auth.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import * as jwt from 'jsonwebtoken';
@@ -77,7 +75,6 @@ function uploadOptions() {
 }
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class PhotosController {
   constructor(
     private readonly photosService: PhotosService,
@@ -169,38 +166,30 @@ export class PhotosController {
     return this.analysisService.getDuplicates(user.id);
   }
 
+  // El frontend siempre manda el JWT por Authorization header (VideoPlayer +
+  // PhotoPreview); el query param ?token= existía como fallback pero nada lo
+  // usaba y dejaba el JWT completo en logs de servidor/proxy — eliminado.
   @SkipAuth()
   @Get('photos/:id/stream')
   async streamPhoto(
     @Param('id') id: string,
     @Res() res: any,
     @Req() req: any,
-    @Query('token') token?: string,
   ) {
     let userId: string;
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new UnauthorizedException('JWT_SECRET not configured');
 
     const authHeader = req.headers?.authorization;
-    if (authHeader) {
-      try {
-        const payload = jwt.verify(
-          authHeader.replace('Bearer ', ''),
-          secret,
-        ) as any;
-        userId = payload.sub || payload.id;
-      } catch {
-        throw new UnauthorizedException('Token inválido o expirado');
-      }
-    } else if (token) {
-      try {
-        const payload = jwt.verify(token, secret) as any;
-        userId = payload.sub || payload.id;
-      } catch {
-        throw new UnauthorizedException('Token inválido o expirado');
-      }
-    } else {
-      throw new UnauthorizedException();
+    if (!authHeader) throw new UnauthorizedException();
+    try {
+      const payload = jwt.verify(
+        authHeader.replace('Bearer ', ''),
+        secret,
+      ) as any;
+      userId = payload.sub || payload.id;
+    } catch {
+      throw new UnauthorizedException('Token inválido o expirado');
     }
     const rangeHeader = req.headers?.range as string | undefined;
     const { stream, contentType, contentLength, contentRange, isPartial } =

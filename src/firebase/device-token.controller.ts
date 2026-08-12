@@ -2,16 +2,13 @@ import {
   Controller,
   Post,
   Body,
-  UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma.service';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class DeviceTokenController {
   constructor(private prisma: PrismaService) {}
 

@@ -11,9 +11,7 @@ import {
   HttpStatus,
   BadRequestException,
   NotFoundException,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { FacesService } from './faces.service';
 import { UpdateFaceDto } from './dto/update-face.dto';
@@ -28,7 +26,6 @@ import {
 } from '../common/constants';
 
 @Controller('faces')
-@UseGuards(JwtAuthGuard)
 export class FacesController {
   constructor(private readonly facesService: FacesService) {}
 
