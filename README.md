@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/logo/vaulta-icon.png" width="72" alt="Vaulta" /></p>
+
 # Vaulta — Backend
 
 API para Vaulta, una app de fotos privadas para Android. Capturas y descripción completa: **[vaulta_frontend](https://github.com/Hector0122/vaulta_frontend)**.
