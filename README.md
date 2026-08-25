@@ -1,78 +1,36 @@
 # Vaulta — Backend
 
-NestJS 11 API for photo management. Stores photos in Cloudflare R2 (S3-compatible), generates thumbnails via `sharp`, manages metadata in PostgreSQL (Neon), with push notifications (Firebase) and email export (Mailgun).
+API para Vaulta, una app de fotos privadas para Android. Capturas y descripción completa: **[vaulta_frontend](https://github.com/Hector0122/vaulta_frontend)**.
 
-## Tech stack
+## Stack
 
-- **Runtime:** Node.js >=20
-- **Framework:** NestJS 11 (TypeScript, strict mode)
-- **Database:** PostgreSQL via Prisma ORM (Neon)
-- **Storage:** Cloudflare R2 (S3-compatible)
-- **Auth:** JWT + Refresh token rotation
-- **AI:** Sharp (thumbnails), custom blur/hash analysis
-- **Notifications:** Firebase Admin SDK
-- **Email:** Mailgun API
+| | |
+|---|---|
+| Framework | NestJS 11 |
+| ORM / DB | Prisma + PostgreSQL (Neon) |
+| Storage | Cloudflare R2 (S3-compatible) |
+| Miniaturas / video | sharp · ffmpeg |
+| Reconocimiento facial | face-api.js + TensorFlow |
+| Notificaciones / email | Firebase · Mailgun |
 
-## Setup
+Desplegado en Railway.
 
-```bash
-npm install
-cp .env.example .env   # configure all variables
-npx prisma migrate dev # run migrations
-npm run start:dev      # development (watch mode)
-```
+## Arquitectura
 
-## Environment variables
+- **Auth** — JWT con rotación de refresh tokens
+- **Photos** — el módulo más grande: subida, miniaturas, streaming con byte-range, papelera con soft delete
+- **Albums** — álbumes normales + "Caja Fuerte" protegida
+- **Faces** — detección y agrupación de rostros
+- **Analysis** — detección de duplicados por hash perceptual
+- **Export** — exportación de fotos/álbumes a ZIP por email
 
-See `.env.example` for all required variables: `DATABASE_URL`, `JWT_SECRET`, R2 credentials, etc.
+## Cómo está resuelto
 
-## API endpoints (main)
+- La **detección de rostros corre en un proceso hijo separado** (no dentro del proceso principal de Nest) porque la librería de reconocimiento facial y su runtime de ML no conviven bien con el resto del framework — mantiene el servidor principal responsivo mientras se procesan miles de fotos.
+- La **subida de fotos corre en un worker thread**: sube a R2, genera miniaturas y calcula un hash perceptual sin bloquear el hilo principal.
+- El **proveedor de almacenamiento es intercambiable** — el mismo código habla con Cloudflare R2 o con AWS S3 según la variable de entorno configurada, sin ramas de código separadas.
+- Los rostros se agrupan por **distancia euclidiana sobre descriptores de 128 dimensiones**, no por comparación exacta de imagen.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/auth/register` | Register user |
-| `POST` | `/auth/login` | Login, returns JWT + refresh token |
-| `POST` | `/auth/refresh` | Rotate refresh token |
-| `POST` | `/auth/logout` | Invalidate refresh token |
-| `POST` | `/auth/update-profile` | Update name/password |
-| `GET` | `/photos` | List photos (cursor-based pagination) |
-| `GET` | `/photos/stats` | Photo/album/favorite counts |
-| `GET` | `/photos/trash` | List soft-deleted photos |
-| `GET` | `/photos/this-day` | Photos from same date in prior years |
-| `GET` | `/photos/duplicates` | Duplicate groups (by perceptual hash) |
-| `GET` | `/photos/:id` | Single photo signed URL |
-| `GET` | `/photos/:id/stream` | Stream (byte-range, public with `?token=`) |
-| `GET` | `/photos/:id/share` | Generate share link |
-| `POST` | `/photos/upload` | Single photo upload (multipart) |
-| `POST` | `/photos/upload-batch` | Batch upload via worker thread |
-| `PATCH` | `/photos/:id/favorite` | Toggle favorite |
-| `PATCH` | `/photos/:id/private` | Toggle private |
-| `POST` | `/photos/:id/tags` | Add tag |
-| `DELETE` | `/photos/:id/tags` | Remove tag |
-| `DELETE` | `/photos/:id` | Soft delete |
-| `POST` | `/photos/:id/restore` | Restore from trash |
-| `DELETE` | `/photos/trash/:id` | Permanently delete (S3 + DB) |
-| `POST` | `/photos/export` | Export all photos as ZIP (email) |
-| `POST` | `/albums/:id/export` | Export album as ZIP |
-| `POST` | `/photos/export-by-date` | Export by date range |
-| `GET` | `/exports/:id` | Poll export progress |
-| `POST` | `/device-token` | Register FCM push token |
-| `POST` | `/photos/analyze-all` | Re-analyze all photos |
-| `GET` | `/albums` | List albums |
-| `POST` | `/albums` | Create album |
-| `DELETE` | `/albums/:id` | Delete album |
-| `POST` | `/albums/:id/photos` | Add photos to album |
-| `DELETE` | `/albums/:id/photos` | Remove photos from album |
+## Licencia
 
-## Notes
-
-- **500MB** max file size (configured in `main.ts`)
-- Thumbnails: 300px width, 70% quality, stored as `thumbnails/thumb-{key}`
-- Videos: thumbnail extracted at 1s mark via ffmpeg
-- All photo routes require JWT Bearer auth (except `/stream` which accepts `?token=`)
-- S3 keys format: `{timestamp}-{original-filename}`
-- Presigned URLs expire after 7 days
-
-## Deployment
-
-Currently deployed on Railway. See `.env.example` for all required env vars.
+MIT — ver [LICENSE](LICENSE)
